@@ -20,9 +20,7 @@ function debugLog(message, data = null) {
     const timestamp = new Date().toISOString();
     const logMessage = `[${timestamp}] ${message}`;
     console.log(logMessage);
-    if (data) {
-        console.log('Data:', JSON.stringify(data, null, 2));
-    }
+
 }
 
 // Browser instance management
@@ -38,7 +36,7 @@ async function initBrowser(retryCount = 0) {
             debugLog(`Initializing new browser instance (attempt ${retryCount + 1}/${MAX_RETRIES})`);
             browser = await puppeteer.launch({
                 headless: 'new',
-                //executablePath: '/home/ownera/.cache/puppeteer/chrome/linux-137.0.7151.55/chrome-linux64/chrome',
+                executablePath: '/home/ownera/.cache/puppeteer/chrome/linux-137.0.7151.55/chrome-linux64/chrome',
                 // dumpio: true,
                 args: [
                     '--no-sandbox',
@@ -165,45 +163,35 @@ app.all('*', async (req, res) => {
         let requestInterceptor = null;
         try {
             await page.setRequestInterception(true);
-            requestInterceptor = page.on('request', request => {
-                debugLog(`[${requestId}] Request:`, {
-                    url: request.url(),
-                    method: request.method(),
-                    headers: request.headers()
-                });
-                request.continue();
+            // Wait a small amount of time to ensure interception is fully enabled
+            await wait(100);
+            requestInterceptor = page.on('request', async request => {
+                try {
+                    await request.continue();
+                } catch (error) {
+                    debugLog(`[${requestId}] Error continuing request:`, error);
+                }
             });
         } catch (error) {
             debugLog(`[${requestId}] Failed to set up request interception:`, error);
+            requestInterceptor = null;
         }
 
-        page.on('response', response => {
-            debugLog(`[${requestId}] Response:`, {
-                url: response.url(),
-                status: response.status(),
-                headers: response.headers()
-            });
-        });
-
         page.on('console', msg => {
-            debugLog(`[${requestId}] Console ${msg.type()}:`, {
-                text: msg.text()
-            });
+            debugLog(`[${requestId}] Console ${msg.type()}:`, msg.text());
         });
 
         // Navigate to the target URL with increased timeout and multiple strategies
         debugLog(`[${requestId}] Navigating to target URL`);
         let response;
         try {
-            // Only wait for the initial HTML load
             response = await page.goto(targetUrl, {
-                waitUntil: 'domcontentloaded', // Only wait for initial HTML
+                waitUntil: 'domcontentloaded',
                 timeout: NAVIGATION_TIMEOUT
             });
             debugLog(`[${requestId}] Initial HTML loaded successfully`);
         } catch (error) {
             debugLog(`[${requestId}] Navigation failed, getting current content:`, error);
-            // Get whatever content is available
             const currentUrl = await page.url();
             debugLog(`[${requestId}] Current page URL:`, { currentUrl });
             const content = await page.content();
@@ -254,7 +242,7 @@ app.all('*', async (req, res) => {
         if (page) {
             try {
                 debugLog(`[${requestId}] Closing page`);
-                await page.close();
+                await page.close({ runBeforeUnload: false });
             } catch (closeError) {
                 debugLog(`[${requestId}] Error closing page:`, closeError);
             }
