@@ -99,6 +99,10 @@ function isStaticAsset(path) {
 }
 
 function isHtmlRequest(req) {
+    // Always treat /.well-known/vercel/security/* as non-HTML
+    if (/^\/\.well-known\/vercel\/security\//.test(req.path)) {
+        return false;
+    }
     const accept = req.headers['accept'] || '';
     return accept.includes('text/html') || /\.html(\?.*)?$/i.test(req.path) || (!isStaticAsset(req.path) && !/\.[a-z0-9]+$/i.test(req.path));
 }
@@ -107,14 +111,24 @@ function getSessionId(req) {
     return (req.query && req.query.sid) || req.headers['x-session-id'] || (req.cookies && req.cookies.sid) || Math.random().toString(36).substring(2);
 }
 
-function inferSubdomain(req, config) {
-    // 1. Path-based: /sub-leonardo-ai/...
+function inferSubdomain(req, config, currentBrowserUrl) {
+    // 1. If current browser URL is available, use its subdomain
+    if (currentBrowserUrl && currentBrowserUrl !== '[none]' && currentBrowserUrl !== '[error retrieving URL]') {
+        try {
+            const url = new URL(currentBrowserUrl);
+            const subMatch = url.hostname.match(/^([a-z0-9-]+)\.leonardo\.ai$/i);
+            if (subMatch) {
+                return subMatch[1];
+            }
+        } catch (e) {}
+    }
+    // 2. Path-based: /sub-leonardo-ai/...
     const subdomainPattern = /^\/([a-z0-9-]+)-leonardo-ai(\/.*)?$/i;
     const match = req.path.match(subdomainPattern);
     if (match) {
         return match[1];
     }
-    // 2. Referer-based: https://<sub>.leonardo.ai/...
+    // 3. Referer-based: https://<sub>.leonardo.ai/...
     const referer = req.headers['referer'] || req.headers['referrer'];
     if (referer) {
         try {
@@ -125,12 +139,12 @@ function inferSubdomain(req, config) {
             }
         } catch (e) {}
     }
-    // 3. Default: root domain
+    // 4. Default: root domain
     return null;
 }
 
-function getTargetUrl(req, config) {
-    const sub = inferSubdomain(req, config);
+function getTargetUrl(req, config, currentBrowserUrl) {
+    const sub = inferSubdomain(req, config, currentBrowserUrl);
     let rest = req.path;
     // If path-based, strip the /sub-leonardo-ai prefix
     const subdomainPattern = /^\/([a-z0-9-]+)-leonardo-ai(\/.*)?$/i;
@@ -164,10 +178,19 @@ app.all('*', async (req, res) => {
     // Compute original and modified target URLs
     const incomingUrl = req.protocol + '://' + req.get('host') + req.originalUrl;
     const originalTargetUrl = `https://${config.targetDomain}${req.originalUrl}`;
-    const modifiedTargetUrl = getTargetUrl(req, config);
-    // Log with colors
+    let currentBrowserUrl = '[none]';
+    const page = sessionPages.get(sid);
+    if (page) {
+        try {
+            currentBrowserUrl = await page.url();
+        } catch (e) {
+            currentBrowserUrl = '[error retrieving URL]';
+        }
+    }
+    console.log(chalk.magenta('Current Browser URL: ') + currentBrowserUrl);
     console.log(chalk.green('Incoming URL: ') + incomingUrl);
     console.log(chalk.yellow('Original Target URL: ') + originalTargetUrl);
+    const modifiedTargetUrl = getTargetUrl(req, config, currentBrowserUrl);
     console.log(chalk.cyan('Modified Target URL: ') + modifiedTargetUrl);
 
     debugLog(`[${requestId}] Accept header: ${req.headers['accept']}`);
@@ -176,33 +199,76 @@ app.all('*', async (req, res) => {
 
     if (!isHtml) {
         debugLog(`[${requestId}] Non-HTML request: No Puppeteer page will be created or used.`);
-        const assetUrl = getTargetUrl(req, config);
+        const assetUrl = getTargetUrl(req, config, currentBrowserUrl);
+        // Forward all headers except a few hop-by-hop and proxy-specific ones
+        const filteredHeaders = {};
+        const assetUrlObj = new URL(assetUrl);
+        for (const [key, value] of Object.entries(req.headers)) {
+            const lowerKey = key.toLowerCase();
+            if (
+                lowerKey.startsWith('!~') ||
+                lowerKey.startsWith('x-forwarded-') ||
+                lowerKey === 'connection' ||
+                lowerKey === 'accept-encoding' ||
+                lowerKey === 'content-length' ||
+                lowerKey === 'host'
+            ) {
+                continue;
+            }
+            filteredHeaders[key] = value;
+        }
+        // Set Host header to target host
+        filteredHeaders['host'] = assetUrlObj.host;
+        // Set Referer header to incoming Referer or current browser URL
+        if (req.headers['referer']) {
+            filteredHeaders['referer'] = req.headers['referer'];
+        } else if (currentBrowserUrl && currentBrowserUrl !== '[none]' && currentBrowserUrl !== '[error retrieving URL]') {
+            filteredHeaders['referer'] = currentBrowserUrl;
+        }
+        // Set Origin header to target origin if present in incoming request
+        if (req.headers['origin']) {
+            filteredHeaders['origin'] = assetUrlObj.origin;
+        }
+        // Extra debug for /.well-known/vercel/security/*
+        if (/^\/\.well-known\/vercel\/security\//.test(req.path)) {
+            debugLog(`[${requestId}] [SECURITY] Outgoing request details`, {
+                method: req.method,
+                url: assetUrl,
+                headers: filteredHeaders,
+                body: req.body && Object.keys(req.body).length > 0 ? req.body : '[stream or empty]'
+            });
+        }
         debugLog(`[${requestId}] Proxying ${req.method} request`, {
             incomingUrl: req.protocol + '://' + req.get('host') + req.originalUrl,
             targetUrl: assetUrl
         });
         try {
-            // Forward all headers except a few hop-by-hop ones
-            const filteredHeaders = { ...req.headers };
-            delete filteredHeaders['host'];
-            delete filteredHeaders['connection'];
-            delete filteredHeaders['content-length'];
-            delete filteredHeaders['accept-encoding'];
-
+            // Forward the body correctly for POST/PUT/PATCH
+            let body = undefined;
+            if (req.method !== 'GET' && req.method !== 'HEAD') {
+                if (req.body && Object.keys(req.body).length > 0) {
+                    if (filteredHeaders['content-type'] && filteredHeaders['content-type'].includes('application/json')) {
+                        body = JSON.stringify(req.body);
+                    } else if (filteredHeaders['content-type'] && filteredHeaders['content-type'].includes('application/x-www-form-urlencoded')) {
+                        body = new URLSearchParams(req.body).toString();
+                    } else {
+                        body = req.body;
+                    }
+                } else {
+                    body = req;
+                }
+            }
             const fetchOptions = {
                 method: req.method,
                 headers: filteredHeaders,
                 redirect: 'manual',
-                body: req.method !== 'GET' && req.method !== 'HEAD' ? req : undefined
+                body: body
             };
-
             const assetRes = await fetch(assetUrl, fetchOptions);
-
             // Forward all response headers
             assetRes.headers.forEach((value, key) => {
                 res.setHeader(key, value);
             });
-
             res.status(assetRes.status);
             assetRes.body.pipe(res);
             return;
@@ -213,7 +279,7 @@ app.all('*', async (req, res) => {
         }
     } else {
         // HTML requests: use Puppeteer
-        const targetUrl = getTargetUrl(req, config);
+        const targetUrl = getTargetUrl(req, config, currentBrowserUrl);
         let page = sessionPages.get(sid);
         if (page) {
             debugLog(`[${requestId}] Reusing existing Puppeteer page for session ${sid}`);
@@ -266,7 +332,7 @@ app.all('*', async (req, res) => {
             });
         }
         try {
-            debugLog(`[${requestId}] Navigating to target URL`);
+            console.log(chalk.blue(`[${requestId}] Navigating to target URL: ${targetUrl}`));
             const navigationPromise = page.goto(targetUrl, {
                 waitUntil: 'domcontentloaded',
                 timeout: NAVIGATION_TIMEOUT
