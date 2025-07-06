@@ -15,6 +15,20 @@
     
     console.log("[URL REWRITER] Config loaded:", CONFIG);
     
+    // List of external domains to skip
+    const skipDomains = [
+        "consent.cookiefirst.com",
+        "cdn.jsdelivr.net",
+        "fonts.googleapis.com",
+        "fonts.gstatic.com",
+        "google-analytics.com",
+        "googletagmanager.com",
+        "clarity.ms",
+        "js.stripe.com",
+        "r.wdfl.co",
+        "www.googletagmanager.com"
+    ];
+    
     // Track processed elements to prevent infinite loops
     const processedElements = new WeakSet();
     
@@ -22,6 +36,8 @@
         try {
             const url = new URL(urlString, window.location.origin);
             if (url.protocol !== "https:" && url.protocol !== "http:") return urlString;
+            // Skip external domains
+            if (skipDomains.some(domain => url.hostname.includes(domain))) return urlString;
             const hostname = url.hostname;
             const domainParts = hostname.split(".");
             if (domainParts.length < 2) return urlString;
@@ -50,7 +66,7 @@
             return urlString;
         }
     }
-    
+
     function replaceAttributes(el) {
         if (processedElements.has(el)) return;
         CONFIG.attributes.forEach(attr => {
@@ -75,7 +91,7 @@
             }
         });
     }
-    
+
     const observer = new MutationObserver(mutations => {
         mutations.forEach(mutation => {
             if (mutation.addedNodes) {
@@ -94,20 +110,20 @@
             }
         });
     });
-    
+
     observer.observe(document.documentElement, {
         childList: true,
         subtree: true,
         attributes: true,
         attributeFilter: CONFIG.attributes
     });
-    
+
     // Initial replacement
     const selector = CONFIG.tags.map(t => 
         CONFIG.attributes.map(a => `${t}[${a}]`).join(",")
     ).join(",");
     document.querySelectorAll(selector).forEach(replaceAttributes);
-    
+
     // Fallback interval
     setInterval(() => {
         document.querySelectorAll(selector).forEach(replaceAttributes);
