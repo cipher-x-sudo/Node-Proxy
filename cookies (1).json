@@ -1,0 +1,28 @@
+[
+    {
+        "domain": ".app.leonardo.ai",
+        "expirationDate": 1783265858,
+        "hostOnly": false,
+        "httpOnly": false,
+        "name": "__stripe_mid",
+        "path": "/",
+        "sameSite": "strict",
+        "secure": true,
+        "session": false,
+        "storeId": "0",
+        "value": "6ecbf8f8-1b92-416d-b6ab-b690ab3bfe84a0765a"
+    },
+    {
+        "domain": ".app.leonardo.ai",
+        "expirationDate": 1751731658,
+        "hostOnly": false,
+        "httpOnly": false,
+        "name": "__stripe_sid",
+        "path": "/",
+        "sameSite": "strict",
+        "secure": true,
+        "session": false,
+        "storeId": "0",
+        "value": "1f84178d-216a-41e5-bc69-efff96187ec4de0dbc"
+    }
+]
