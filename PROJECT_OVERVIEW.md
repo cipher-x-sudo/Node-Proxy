@@ -18,7 +18,11 @@ Divided/
 ├── 06-url-utils.js         # URL manipulation and subdomain detection
 ├── 07-session-manager.js   # Session ID generation
 ├── 08-vercel-handler.js    # Vercel security challenge handling
-├── 09-client-interceptor.js # Client-side request interception
+├── 09-client-interceptor.js # (Legacy) Client-side request interception
+├── 10-rewrite-interceptor.js # Combined client-side URL rewriting and modal manipulation
+├── 11-url-rewriter.js      # Standalone client-side URL rewriter
+├── 12-modal-manipulator.js # Standalone client-side modal manipulator
+├── 14-server-url-rewriter.js # Server-side HTML URL rewriting utility
 └── README.md              # Quick reference guide
 ```
 
@@ -244,25 +248,61 @@ if (url.includes('vercel/security') && !url.includes('-leonardo-ai')) {
 - **DOM Override**: Intercepts script tag creation and attribute setting
 - **Dynamic Monitoring**: Uses `MutationObserver` to watch for new content
 - **Subdomain Detection**: Extracts subdomain from current page URL
-- **URL Transformation**: Rewrites vercel/security URLs with proper subdomain prefix
 
-**Injection Process**:
+### 10-rewrite-interceptor.js - Combined Client-Side URL Rewriting & Modal Manipulation
+
+**Purpose**: Injected into browser pages to rewrite Leonardo.ai URLs and manipulate modal content. Uses a config-driven approach with `tags` and `attributes` arrays to target specific elements and attributes.
+
+**Key Features**:
+- Robust URL parsing and rewriting for Leonardo.ai domains only
+- Skips rewriting for known external domains and already-rewritten URLs
+- Tracks processed elements to prevent infinite loops
+- Color-coded debug logging for successful rewrites (minimal output otherwise)
+- Visual indicator and server endpoint for debug logs
+- Modal content manipulation for compatibility with various modal frameworks
+
+### 11-url-rewriter.js - Standalone Client-Side URL Rewriter
+
+**Purpose**: Standalone script for client-side URL rewriting, used for debugging or as a fallback. Shares logic with the main interceptor but focuses solely on URL rewriting.
+
+### 12-modal-manipulator.js - Standalone Modal Manipulator
+
+**Purpose**: Standalone script for manipulating modal content in the browser, used for debugging or as a fallback.
+
+### 14-server-url-rewriter.js - Server-Side HTML URL Rewriting Utility
+
+**Purpose**: Rewrites all matching Leonardo.ai URLs in HTML responses on the server side. Used as a fallback or for debugging. Skips external domains and already-rewritten URLs.
+
+**Key Function**:
+- `rewriteHtmlUrls(html, config)`
+
+### Configuration Format
+
+The config file (`config.js`) now uses arrays for tags and attributes:
 ```javascript
-// Server injects the script into each Puppeteer page
-await page.addScriptTag({
-    content: createClientRequestInterceptor(config)
-});
+module.exports = {
+    proxyDomain: "leonardo.anon404.me",
+    targetDomain: "leonardo.ai",
+    subdomainMarker: "-leonardo-ai",
+    tags: ["img", "link", "script", "iframe"],
+    attributes: ["href", "src", "content"],
+    // ...proxy settings...
+};
 ```
 
-**Client-Side URL Rewriting Logic**:
-```javascript
-// Transforms: /.well-known/vercel/security/static/challenge.v2.min.js
-// To: /app-leonardo-ai/.well-known/vercel/security/static/challenge.v2.min.js
-if (url.includes('vercel/security') && !url.includes(CONFIG.subdomainMarker)) {
-    const newUrl = window.location.protocol + '//' + window.location.host + '/' + subdomain + CONFIG.subdomainMarker + path + search;
-    return newUrl;
-}
-```
+## The Problem
+
+The main issue was that JavaScript code in the browser was making requests to wrong URLs:
+- **Wrong**: `/.well-known/vercel/security/static/challenge.v2.min.js`
+- **Correct**: `/app-leonardo-ai/.well-known/vercel/security/static/challenge.v2.min.js`
+
+## Current Solution
+
+The system now uses both client-side and server-side URL rewriting:
+- **Client-side**: Injected scripts (`10-rewrite-interceptor.js`, `11-url-rewriter.js`) rewrite Leonardo.ai URLs in the DOM and intercept requests before they are sent. Modal content is also manipulated for compatibility.
+- **Server-side**: HTML responses are rewritten as a fallback using `14-server-url-rewriter.js`.
+- **Legacy HTML body rewriting and duplicate logic have been removed.**
+- **All rewriting is now config-driven and robust against external domains.**
 
 ## Request Flow
 
@@ -308,18 +348,12 @@ Session ID → 07-session-manager.js → Page Lookup → Page Reuse/Creation
 - Page count tracking
 - Request/response logging
 - Error handling and cleanup
+- Color-coded debug logs for successful rewrites (minimal output otherwise)
 
 ### ⚡ **Performance Optimization**
 - Static asset direct proxying
 - Page reuse instead of recreation
 - Efficient cookie management
-
-## Configuration
-
-The system uses several configuration sources:
-- **Environment Variables**: `PORT`, `NODE_ENV`
-- **Cookie Files**: `cookies*.json` files in working directory
-- **Config Module**: `../node/src/config.js` for target domain
 
 ## Error Handling
 
@@ -335,4 +369,4 @@ The system uses several configuration sources:
 - **Cookie Security**: HttpOnly, Secure, SameSite settings
 - **Request Filtering**: Headers filtered for security
 
-This modular architecture provides a robust, maintainable solution for proxying Leonardo.ai with proper subdomain handling and security challenge resolution. 
+This modular architecture provides a robust, maintainable solution for proxying Leonardo.ai with proper subdomain handling, security challenge resolution, and modern, config-driven URL rewriting both client- and server-side. 
