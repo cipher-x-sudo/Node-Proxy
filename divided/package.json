@@ -1,4 +1,13 @@
 {
+  "name": "leonardo-proxy",
+  "version": "2.0.0",
+  "description": "Leonardo.ai Path-Based Proxy Server",
+  "main": "./index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "test": "node test.js"
+  },
   "dependencies": {
     "chalk": "^4.1.2",
     "cookie-parser": "^1.4.7",
@@ -6,9 +15,24 @@
     "express": "^5.1.0",
     "helmet": "^8.1.0",
     "https-proxy-agent": "^7.0.4",
-    "node-fetch": "^3.3.2",
+    "node-fetch": "^2.7.0",
     "puppeteer": "^24.11.2",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2"
-  }
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "keywords": [
+    "leonardo.ai",
+    "proxy",
+    "path-based",
+    "puppeteer",
+    "session-management"
+  ],
+  "author": "Your Name",
+  "license": "MIT"
 }

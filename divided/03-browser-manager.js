@@ -1,6 +1,7 @@
+// 03-browser-manager.js - Fixed version without duplicate imports
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-const { debugLog } = require('./02-utilities');
+const { debugLog } = require('./02-utilities'); // Only import once
 const config = require('./config');
 
 puppeteer.use(StealthPlugin());
@@ -108,4 +109,4 @@ module.exports = {
     initBrowser,
     createPage,
     testProxyConnection
-}; 
+};
