@@ -1,0 +1,15 @@
+[
+    {
+        "domain": ".auth.leonardo.ai",
+        "expirationDate": 1752602544.533894,
+        "hostOnly": false,
+        "httpOnly": true,
+        "name": "cognito",
+        "path": "/",
+        "sameSite": "lax",
+        "secure": true,
+        "session": false,
+        "storeId": "0",
+        "value": "\"H4sIAAAAAAAAAAH0AAv/11TD6VRwCpWQKt8mIs0bhkJ1gwfGaw2WXlB3KHiUcv7teHAV7g/qXe0sxMgRJsLyzJrjgjf3gxEiIjGf1JdCxG/FGA9YRHOffT9EpKIXU7mi5U/YobPy7TfgarkdGyV1CWwNd6geonGlt3NmxI43WUiRMgpT6av+mYfCKf8zm6iBiQB5lUDaryueYIbDKf1AB7Mys3be5MVtoPd4RqIhsgjEjPJKIsFWpzF1CA4QiABCqGKH+Ju7c9D6SQj18GUzXjlBhmljOOs+VfdPHz0iXOnAhdKW4WzVJ4pWj9vnqlpxtVpvDeb3a+rCddUYQW7gvX7i20Kvo9v0AAAA.H4sIAAAAAAAAAAEgAN//5psg/G3NXLAF9mE/pfN9oLRTMf86YjqcI5FLre48RKR27aL7IAAAAA==.4\""
+    }
+]

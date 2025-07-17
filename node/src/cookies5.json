@@ -1,0 +1,14 @@
+[
+    {
+        "domain": "auth.leonardo.ai",
+        "hostOnly": true,
+        "httpOnly": true,
+        "name": "XSRF-TOKEN",
+        "path": "/",
+        "sameSite": "lax",
+        "secure": true,
+        "session": true,
+        "storeId": "0",
+        "value": "f4b617ec-a862-4a5e-8887-004125a316ea"
+    }
+]
