@@ -20,11 +20,8 @@ module.exports = {
 
   additionalDomains: [
     'adora-cdn.com',
-    'launchdarkly.com',
     'c.adora-cdn.com',
-    'app.launchdarkly.com',
-    'clientstream.launchdarkly.com',
-    'events.launchdarkly.com'
+    'clientstream.launchdarkly.com'
   ],
   skipRewriteDomains: [
     'consent.cookiefirst.com'
