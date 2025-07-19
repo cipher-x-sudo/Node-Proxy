@@ -101,22 +101,69 @@ function injectScripts(html) {
   return $.html();
 }
 
+// NEW: Check if URL is an API request that should be unproxied
+function isApiRequest(targetUrl) {
+  return targetUrl.includes('api.leonardo.ai');
+}
+
 function proxyResource(targetUrl, req, res) {
   console.log(`${COLORS.proxy}[PROXY] Resource: ${req.method} ${req.originalUrl} -> ${targetUrl}${COLORS.reset}`);
+  
+  // NEW: Special handling for API requests
+  if (isApiRequest(targetUrl)) {
+    console.log(`${COLORS.proxy}[PROXY] Handling API request: ${targetUrl}${COLORS.reset}`);
+    
+    const client = targetUrl.startsWith('https') ? https : http;
+    
+    const requestOptions = {
+      method: req.method,
+      headers: {
+        ...req.headers,
+        'user-agent': req.headers['user-agent'] || config.userAgent,
+      },
+      rejectUnauthorized: false
+    };
+    
+    delete requestOptions.headers.host;
+    
+    const proxyReq = client.request(targetUrl, requestOptions, proxyRes => {
+      const headers = { 
+        ...proxyRes.headers,
+        'access-control-allow-origin': req.headers.origin || '*',
+        'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS',
+        'access-control-allow-headers': 'Content-Type,Authorization,baggage,sentry-trace',
+        'access-control-allow-credentials': 'true'
+      };
+      
+      res.writeHead(proxyRes.statusCode, headers);
+      proxyRes.pipe(res);
+    });
+    
+    proxyReq.on('error', err => {
+      console.log(`${COLORS.error}[ERROR] API proxy error for ${targetUrl}: ${err.message}${COLORS.reset}`);
+      res.status(502).end('API proxy error: ' + err.message);
+    });
+    
+    if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') {
+      req.pipe(proxyReq);
+    } else {
+      proxyReq.end();
+    }
+    return;
+  }
+  
+  // Existing proxy logic for non-API requests
   const client = targetUrl.startsWith('https') ? https : http;
   let mergedCookie = '';
   
-  // Extract hostname from targetUrl
   let targetHostname = '';
   try {
     targetHostname = new URL(targetUrl).hostname;
   } catch {}
   
-  // Check if credentials should be skipped for this domain
   const skipCredentials = Array.isArray(config.noCredentialsDomains) && 
                          config.noCredentialsDomains.includes(targetHostname);
   
-  // Build cookies only for domains that require credentials
   if (!skipCredentials && globalCookies.length) {
     mergedCookie = globalCookies.map(c => `${c.name}=${c.value}`).join('; ');
   }
@@ -126,7 +173,6 @@ function proxyResource(targetUrl, req, res) {
       : req.headers.cookie;
   }
   
-  // Prepare outgoing headers
   const outgoingHeaders = {
     ...req.headers,
     'user-agent': req.headers['user-agent'] || config.userAgent,
@@ -147,7 +193,7 @@ function proxyResource(targetUrl, req, res) {
         })()
       : `https://${config.targetDomain}/`,
     origin: req.headers.origin || `https://${config.proxyDomain}`,
-    ...(skipCredentials ? {} : { cookie: mergedCookie }), // Only include cookies if not skipping
+    ...(skipCredentials ? {} : { cookie: mergedCookie }),
   };
   
   delete outgoingHeaders.host;
@@ -161,17 +207,13 @@ function proxyResource(targetUrl, req, res) {
   const proxyReq = client.request(targetUrl, requestOptions, proxyRes => {
     const headers = { ...proxyRes.headers };
     
-    // Handle CORS headers
     if (req.headers.origin) {
       headers['access-control-allow-origin'] = req.headers.origin;
-      
-      // Only include allow-credentials header for non-skip domains
       if (!skipCredentials) {
         headers['access-control-allow-credentials'] = 'true';
       }
     }
     
-    // Handle allowed headers
     const requestedHeaders = req.headers['access-control-request-headers'];
     if (requestedHeaders) {
       headers['access-control-allow-headers'] = requestedHeaders;
@@ -184,7 +226,7 @@ function proxyResource(targetUrl, req, res) {
     if (proxyRes.statusCode >= 200 && proxyRes.statusCode < 300) {
       console.log(`${COLORS.puppeteer}[SUCCESS] ${req.method} ${targetUrl} -> ${proxyRes.statusCode}${COLORS.reset}`);
     } else {
-      console.log(`${COLORS.error}[FAILED] ${req.method} ${targetUrl} -> ${proxyRes.statusCode}${COLORS.reset}`);
+      console.log(`${COLors.error}[FAILED] ${req.method} ${targetUrl} -> ${proxyRes.statusCode}${COLORS.reset}`);
     }
     proxyRes.pipe(res);
   });
@@ -232,6 +274,12 @@ app.use(async (req, res) => {
 
   const staticResource = isStaticResource(cleanPath);
   const accept = req.headers.accept || '';
+
+  // NEW: Handle API requests immediately
+  if (isApiRequest(targetUrl)) {
+    proxyResource(targetUrl, req, res);
+    return;
+  }
 
   if (!staticResource && accept.includes('text/html')) {
     const browser = await browserPromise;

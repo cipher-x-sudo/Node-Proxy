@@ -20,12 +20,14 @@ module.exports = {
 
   skipRewriteDomains: [
     'consent.cookiefirst.com'
+    
   ],
   // Domains for which credentials (cookies, etc) should NOT be sent
   noCredentialsDomains: [
     'app.launchdarkly.com',
     'events.launchdarkly.com',
     'c.adora-cdn.com',
-    'consent.cookiefirst.com' // Also added to prevent potential future issues
+    'consent.cookiefirst.com',
+    'api.leonardo.ai'
   ]
 }; 
