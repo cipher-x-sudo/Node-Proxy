@@ -42,8 +42,22 @@ if (require.main === module) {
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
 
 app.options(/.*/, (req, res) => {
-  res.set('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.set('Access-Control-Allow-Credentials', 'true');
+  const origin = req.headers.origin;
+  
+  const allowedOrigins = [
+    'https://app.localhost:3000',
+    'http://app.localhost:3000',
+    'https://localhost:3000',
+    'http://localhost:3000'
+  ];
+
+  if (origin && allowedOrigins.includes(origin)) {
+    res.set('Access-Control-Allow-Origin', origin);
+    res.set('Access-Control-Allow-Credentials', 'true');
+  } else if (origin) {
+    res.set('Access-Control-Allow-Origin', origin);
+  }
+
   res.set('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
   
   const requestedHeaders = req.headers['access-control-request-headers'];
@@ -52,47 +66,10 @@ app.options(/.*/, (req, res) => {
   } else {
     res.set('Access-Control-Allow-Headers', 'Content-Type,Authorization,baggage,sentry-trace');
   }
-  
-  res.status(204).end();
-});
 
-// Middleware to handle external proxy requests
-app.use((req, res, next) => {
-  // Check if this is an external proxy request
-  if (req.originalUrl.startsWith('/proxy-external/')) {
-    // Extract the full path after /proxy-external/
-    const fullPath = req.originalUrl.substring('/proxy-external/'.length);
-    
-    // Preserve query parameters
-    const queryIndex = fullPath.indexOf('?');
-    const query = queryIndex !== -1 ? fullPath.substring(queryIndex) : '';
-    const pathWithoutQuery = queryIndex !== -1 ? fullPath.substring(0, queryIndex) : fullPath;
-    
-    // Find the first slash to separate hostname and path
-    const firstSlash = pathWithoutQuery.indexOf('/');
-    let hostname, path;
-    
-    if (firstSlash === -1) {
-      // No path, just hostname
-      hostname = pathWithoutQuery;
-      path = '';
-    } else {
-      // Split into hostname and path
-      hostname = pathWithoutQuery.substring(0, firstSlash);
-      path = pathWithoutQuery.substring(firstSlash);
-    }
-    
-    // Build target URL
-    const targetUrl = `https://${hostname}${path}${query}`;
-    
-    console.log(`${COLORS.proxy}[EXTERNAL PROXY] ${req.method} ${req.originalUrl} -> ${targetUrl}${COLORS.reset}`);
-    
-    // Reuse our proxy function
-    return proxyResource(targetUrl, req, res);
-  }
-  
-  // If not an external proxy request, continue to next middleware
-  next();
+  res.set('Access-Control-Max-Age', '86400');
+
+  res.status(204).end();
 });
 
 function parseSubdomainFromHost(host, rootDomain) {
@@ -105,31 +82,14 @@ function parseSubdomainFromHost(host, rootDomain) {
   return null;
 }
 
-function buildTargetUrl(subdomain, cleanPath, query) {
-  const targetHost = subdomain ? `${subdomain}.${config.targetDomain}` : config.targetDomain;
-  return `https://${targetHost}${cleanPath}${query ? '?' + query : ''}`;
-}
-
-function loadCookies() {
-  const cookieFiles = fs.readdirSync(process.cwd()).filter(f => f.startsWith('cookies') && f.endsWith('.json'));
-  let allCookies = [];
-  cookieFiles.forEach(file => {
-    try {
-      const data = JSON.parse(fs.readFileSync(file, 'utf8'));
-      if (Array.isArray(data)) allCookies = allCookies.concat(data);
-    } catch {}
-  });
-  return allCookies;
-}
-
 function injectScripts(html) {
   const configScript = `<script>window.proxyConfig = ${JSON.stringify({
     proxyDomain: config.proxyDomain,
     targetDomain: config.targetDomain,
     tags: config.tagsToOverride,
     attributes: config.attributesToOverride,
-    additionalDomains: config.additionalDomains,
-    skipRewriteDomains: config.skipRewriteDomains
+    skipRewriteDomains: config.skipRewriteDomains,
+    noCredentialsDomains: config.noCredentialsDomains
   })};</script>`;
   const rewriteRequestsTag = '<script src="/assets/rewrite-requests.js"></script>';
   let s1Tag = '';
@@ -141,50 +101,32 @@ function injectScripts(html) {
   return $.html();
 }
 
-function rewriteHtml(html, subdomain) {
-  const $ = cheerio.load(html, { decodeEntities: false });
-  for (const tag of config.tagsToOverride) {
-    $(tag).each((_, el) => {
-      for (const attr of config.attributesToOverride) {
-        const val = $(el).attr(attr);
-        if (typeof val === 'string') {
-          const domainPattern = config.targetDomain.replace(/\./g, '\\.');
-          const absRegex = new RegExp(`^(https?:)?//([a-z0-9-]+)\\.${domainPattern}(/.*)$`, 'i');
-          const relRegex = new RegExp('^/');
-          if (absRegex.test(val)) {
-            // Only rewrite the host part, leave the path untouched
-            const match = val.match(absRegex);
-            const sub = match[2];
-            const path = match[3];
-            let newHost = sub && sub !== 'null' ? `${sub}.${config.proxyDomain}` : config.proxyDomain;
-            $(el).attr(attr, `https://${newHost}${path}`);
-          } else if (relRegex.test(val)) {
-            if (subdomain && subdomain !== 'null') {
-              $(el).attr(attr, `https://${subdomain}.${config.proxyDomain}${val}`);
-            } else {
-              $(el).attr(attr, `https://${config.proxyDomain}${val}`);
-            }
-          }
-        }
-      }
-    });
-  }
-  return $.html();
-}
-
 function proxyResource(targetUrl, req, res) {
   console.log(`${COLORS.proxy}[PROXY] Resource: ${req.method} ${req.originalUrl} -> ${targetUrl}${COLORS.reset}`);
   const client = targetUrl.startsWith('https') ? https : http;
   let mergedCookie = '';
-  if (globalCookies.length) {
+  
+  // Extract hostname from targetUrl
+  let targetHostname = '';
+  try {
+    targetHostname = new URL(targetUrl).hostname;
+  } catch {}
+  
+  // Check if credentials should be skipped for this domain
+  const skipCredentials = Array.isArray(config.noCredentialsDomains) && 
+                         config.noCredentialsDomains.includes(targetHostname);
+  
+  // Build cookies only for domains that require credentials
+  if (!skipCredentials && globalCookies.length) {
     mergedCookie = globalCookies.map(c => `${c.name}=${c.value}`).join('; ');
   }
-  if (req.headers.cookie) {
+  if (!skipCredentials && req.headers.cookie) {
     mergedCookie = mergedCookie
       ? mergedCookie + '; ' + req.headers.cookie
       : req.headers.cookie;
   }
   
+  // Prepare outgoing headers
   const outgoingHeaders = {
     ...req.headers,
     'user-agent': req.headers['user-agent'] || config.userAgent,
@@ -205,7 +147,7 @@ function proxyResource(targetUrl, req, res) {
         })()
       : `https://${config.targetDomain}/`,
     origin: req.headers.origin || `https://${config.proxyDomain}`,
-    cookie: mergedCookie,
+    ...(skipCredentials ? {} : { cookie: mergedCookie }), // Only include cookies if not skipping
   };
   
   delete outgoingHeaders.host;
@@ -218,9 +160,18 @@ function proxyResource(targetUrl, req, res) {
   
   const proxyReq = client.request(targetUrl, requestOptions, proxyRes => {
     const headers = { ...proxyRes.headers };
-    headers['access-control-allow-origin'] = req.headers.origin || '*';
-    headers['access-control-allow-credentials'] = 'true';
     
+    // Handle CORS headers
+    if (req.headers.origin) {
+      headers['access-control-allow-origin'] = req.headers.origin;
+      
+      // Only include allow-credentials header for non-skip domains
+      if (!skipCredentials) {
+        headers['access-control-allow-credentials'] = 'true';
+      }
+    }
+    
+    // Handle allowed headers
     const requestedHeaders = req.headers['access-control-request-headers'];
     if (requestedHeaders) {
       headers['access-control-allow-headers'] = requestedHeaders;

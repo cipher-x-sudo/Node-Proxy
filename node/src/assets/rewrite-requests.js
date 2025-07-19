@@ -5,6 +5,7 @@
   const additionalDomains = config.additionalDomains || [];
   const noRewriteDomains = config.noRewriteDomains || [];
   const skipRewriteDomains = config.skipRewriteDomains || [];
+  const noCredentialsDomains = config.noCredentialsDomains || [];
 
   function getSubdomain(host, rootDomain) {
     const parts = host.split('.');
@@ -34,7 +35,6 @@
     try {
       const parsed = new URL(url);
 
-      
       if (noRewriteDomains.includes(parsed.hostname)) {
         // Replace proxy domain in the path with target domain
         const proxyDomainPattern = new RegExp(config.proxyDomain.replace(/\./g, '\\.'), 'g');
@@ -55,33 +55,54 @@
           parsed.host = newHost;
           return parsed.toString();
         }
-        // For additional domains: rewrite to proxy domain with special path
-        const newPath = `/proxy-external/${parsed.hostname}${parsed.pathname}`;
-        return `https://${window.location.host}${newPath}${parsed.search}`;
+        // For additional domains: preserve subdomain logic if needed, or just return as is
+        // (No more /proxy-external rewrite)
+        return url;
       }
+      // For all other (external) domains, do not rewrite
       return url;
     } catch {
       return url;
     }
   }
 
+  function isNoCredentialsDomain(url) {
+    try {
+      const parsed = new URL(url);
+      return noCredentialsDomains.some(domain => 
+        parsed.hostname === domain || parsed.hostname.endsWith(`.${domain}`)
+      );
+    } catch {
+      return false;
+    }
+  }
+
   const origFetch = window.fetch;
   window.fetch = function(input, init) {
     init = init || {};
-    init.credentials = 'include';
-    
+    let url = typeof input === 'string' ? input : (input && input.url ? input.url : '');
+    url = rewriteUrl(url);
+    if (!isNoCredentialsDomain(url)) {
+      init.credentials = 'include';
+    } else {
+      delete init.credentials;
+    }
     if (typeof input === 'string') {
-      input = rewriteUrl(input);
+      input = url;
     } else if (input && input.url) {
-      input = new Request(rewriteUrl(input.url), input);
+      input = new Request(url, input);
     }
     return origFetch.call(this, input, init);
   };
 
   const origOpen = XMLHttpRequest.prototype.open;
   XMLHttpRequest.prototype.open = function(method, url, ...args) {
-    this.withCredentials = true;
     const rewrittenUrl = rewriteUrl(url);
+    if (!isNoCredentialsDomain(rewrittenUrl)) {
+      this.withCredentials = true;
+    } else {
+      this.withCredentials = false;
+    }
     return origOpen.call(this, method, rewrittenUrl, ...args);
   };
 

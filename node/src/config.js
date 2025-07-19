@@ -18,11 +18,14 @@ module.exports = {
   // New option to enable/disable injection of s1.js
   injectS1: false,
 
-  additionalDomains: [
-    'adora-cdn.com',
-    'c.adora-cdn.com'
-  ],
   skipRewriteDomains: [
     'consent.cookiefirst.com'
+  ],
+  // Domains for which credentials (cookies, etc) should NOT be sent
+  noCredentialsDomains: [
+    'app.launchdarkly.com',
+    'events.launchdarkly.com',
+    'c.adora-cdn.com',
+    'consent.cookiefirst.com' // Also added to prevent potential future issues
   ]
 }; 
