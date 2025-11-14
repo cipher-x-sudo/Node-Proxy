@@ -379,12 +379,12 @@ if (require.main === module) {
       key: fs.readFileSync(keyPath),
       cert: fs.readFileSync(certPath)
     };
-    https.createServer(options, app).listen(PORT, () => {
-      console.log(`Proxy server running with HTTPS on https://localhost:${PORT}`);
+    https.createServer(options, app).listen(PORT, '0.0.0.0', () => {
+      console.log(`Proxy server running with HTTPS on https://0.0.0.0:${PORT}`);
     });
   } else {
-    app.listen(PORT, () => {
-      console.log(`Proxy server running on http://localhost:${PORT}`);
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`Proxy server running on http://0.0.0.0:${PORT}`);
     });
   }
 }
