@@ -2,8 +2,8 @@ const express = require('express');
 const httpProxy = require('http-proxy');
 const cors = require('cors');
 
-const BRIDGE_PORT = 40313; // The port this bridge will listen on
-const PROXY_TARGET = 'http://localhost:40313'; // Where simple-proxy.js is running
+const BRIDGE_PORT = process.env.PORT || process.env.BRIDGE_PORT || 40313; // The port this bridge will listen on
+const PROXY_TARGET = process.env.PROXY_TARGET || `http://localhost:${BRIDGE_PORT}`; // Where simple-proxy.js is running
 
 const app = express();
 const proxy = httpProxy.createProxyServer({ changeOrigin: true });

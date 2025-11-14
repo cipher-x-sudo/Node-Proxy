@@ -26,11 +26,14 @@ let browserPromise = puppeteer.launch({
   headless: 'new',
 });
 
-const cookieFiles = fs.readdirSync(process.cwd()).filter(f => f.startsWith('cookies') && f.endsWith('.json'));
+// Read cookie files from src directory (where this file is located)
+const cookieDir = __dirname;
+const cookieFiles = fs.readdirSync(cookieDir).filter(f => f.startsWith('cookies') && f.endsWith('.json'));
 const globalCookies = [];
 for (const file of cookieFiles) {
   try {
-    const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const filePath = path.join(cookieDir, file);
+    const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
     if (Array.isArray(data)) globalCookies.push(...data);
   } catch {}
 }
