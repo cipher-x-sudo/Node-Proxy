@@ -20,9 +20,14 @@ const COLORS = {
 };
 
 let browserPromise = puppeteer.launch({
-  args: config.proxyEnabled ? [
-    `--proxy-server=${config.httpProxy.host}:${config.httpProxy.port}`
-  ] : [],
+  args: [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',
+    ...(config.proxyEnabled ? [
+      `--proxy-server=${config.httpProxy.host}:${config.httpProxy.port}`
+    ] : [])
+  ],
   headless: 'new',
 });
 
