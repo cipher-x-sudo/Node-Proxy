@@ -354,10 +354,6 @@ app.use(async (req, res) => {
 module.exports = app;
 
 if (require.main === module) {
-  const fs = require('fs');
-  const certPath = path.join(__dirname, 'cert.pem');
-  const keyPath = path.join(__dirname, 'key.pem');
-  
   const shutdown = async () => {
     console.log('\nShutting down gracefully...');
     try {
@@ -374,17 +370,8 @@ if (require.main === module) {
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 
-  if (fs.existsSync(certPath) && fs.existsSync(keyPath)) {
-    const options = {
-      key: fs.readFileSync(keyPath),
-      cert: fs.readFileSync(certPath)
-    };
-    https.createServer(options, app).listen(PORT, '0.0.0.0', () => {
-      console.log(`Proxy server running with HTTPS on https://0.0.0.0:${PORT}`);
-    });
-  } else {
-    app.listen(PORT, '0.0.0.0', () => {
-      console.log(`Proxy server running on http://0.0.0.0:${PORT}`);
-    });
-  }
+  // Use HTTP only - Railway handles HTTPS termination at the edge
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Proxy server running on http://0.0.0.0:${PORT}`);
+  });
 }
