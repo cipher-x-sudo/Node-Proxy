@@ -51,19 +51,11 @@ app.use('/assets', express.static(path.join(__dirname, 'assets')));
 
 app.options(/.*/, (req, res) => {
   const origin = req.headers.origin;
-  
-  const allowedOrigins = [
-    'https://app.localhost:3000',
-    'http://app.localhost:3000',
-    'https://localhost:3000',
-    'http://localhost:3000'
-  ];
 
-  if (origin && allowedOrigins.includes(origin)) {
+  // Set CORS headers for any origin
+  if (origin) {
     res.set('Access-Control-Allow-Origin', origin);
     res.set('Access-Control-Allow-Credentials', 'true');
-  } else if (origin) {
-    res.set('Access-Control-Allow-Origin', origin);
   }
 
   res.set('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
@@ -114,7 +106,12 @@ function injectScripts(html) {
 
 // NEW: Check if URL is an API request that should be unproxied
 function isApiRequest(targetUrl) {
-  return targetUrl.includes('api.leonardo.ai');
+  try {
+    const url = new URL(targetUrl);
+    return url.hostname.startsWith('api.') || url.pathname.includes('/v1/graphql') || url.pathname.includes('/graphql');
+  } catch {
+    return targetUrl.includes('api.leonardo.ai') || targetUrl.includes('api.hostme360.tech') || targetUrl.includes('/v1/graphql') || targetUrl.includes('/graphql');
+  }
 }
 
 function proxyResource(targetUrl, req, res) {
@@ -139,12 +136,25 @@ function proxyResource(targetUrl, req, res) {
     
     const proxyReq = client.request(targetUrl, requestOptions, proxyRes => {
       const headers = { 
-        ...proxyRes.headers,
-        'access-control-allow-origin': req.headers.origin || '*',
-        'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS',
-        'access-control-allow-headers': 'Content-Type,Authorization,baggage,sentry-trace',
-        'access-control-allow-credentials': 'true'
+        ...proxyRes.headers
       };
+      
+      // Set CORS headers - must use specific origin when credentials are enabled
+      if (req.headers.origin) {
+        headers['access-control-allow-origin'] = req.headers.origin;
+        headers['access-control-allow-credentials'] = 'true';
+      } else {
+        headers['access-control-allow-origin'] = '*';
+      }
+      
+      headers['access-control-allow-methods'] = 'GET,POST,PUT,DELETE,OPTIONS';
+      
+      const requestedHeaders = req.headers['access-control-request-headers'];
+      if (requestedHeaders) {
+        headers['access-control-allow-headers'] = requestedHeaders;
+      } else {
+        headers['access-control-allow-headers'] = 'Content-Type,Authorization,baggage,sentry-trace';
+      }
       
       res.writeHead(proxyRes.statusCode, headers);
       proxyRes.pipe(res);
@@ -218,12 +228,16 @@ function proxyResource(targetUrl, req, res) {
   const proxyReq = client.request(targetUrl, requestOptions, proxyRes => {
     const headers = { ...proxyRes.headers };
     
+    // Always set CORS headers if origin is present
     if (req.headers.origin) {
       headers['access-control-allow-origin'] = req.headers.origin;
-      if (!skipCredentials) {
-        headers['access-control-allow-credentials'] = 'true';
-      }
+      // Always set credentials to 'true' for CORS when origin is present
+      // (skipCredentials is about sending cookies TO the target, not CORS headers)
+      headers['access-control-allow-credentials'] = 'true';
     }
+    
+    // Always set allow-methods for CORS
+    headers['access-control-allow-methods'] = 'GET,POST,PUT,DELETE,OPTIONS';
     
     const requestedHeaders = req.headers['access-control-request-headers'];
     if (requestedHeaders) {
