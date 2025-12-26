@@ -31,6 +31,22 @@
     return false;
   }
 
+  function isCookiefirstDomain(hostname) {
+    // Check if hostname is cookiefirst.com or any subdomain
+    const cookiefirstDomains = ['cookiefirst.com', 'consent.cookiefirst.com', 'consent-eu.cookiefirst.com'];
+    for (const domain of cookiefirstDomains) {
+      if (hostname === domain) return true;
+      // Check subdomain match
+      const domainParts = domain.split('.');
+      const hostnameParts = hostname.split('.');
+      if (hostnameParts.length >= domainParts.length) {
+        const hostnameSuffix = hostnameParts.slice(-domainParts.length).join('.');
+        if (hostnameSuffix === domain) return true;
+      }
+    }
+    return false;
+  }
+
   function rewriteUrl(url) {
     try {
       const parsed = new URL(url);
@@ -47,6 +63,14 @@
         return url;
       }
 
+      // Check if URL is for cookiefirst.com - replace proxy domain in path with target domain
+      if (isCookiefirstDomain(parsed.hostname)) {
+        // Replace proxy domain in the path with target domain
+        const proxyDomainPattern = new RegExp(proxyDomain.replace(/\./g, '\\.'), 'g');
+        parsed.pathname = parsed.pathname.replace(proxyDomainPattern, targetDomain);
+        return parsed.toString();
+      }
+
       if (shouldRewriteHost(parsed.hostname)) {
         // For target domain: preserve subdomain
         if (parsed.hostname === targetDomain || parsed.hostname.endsWith('.' + targetDomain)) {
@@ -59,18 +83,6 @@
         // (No more /proxy-external rewrite)
         return url;
       }
-      
-      // For external domains: if path contains proxy domain, replace with target domain
-      // This fixes cases where the server generated URLs with the proxy domain in the path
-      const baseProxyDomain = proxyDomain.split(':')[0]; // Remove port if present
-      if (parsed.pathname.includes(baseProxyDomain) || parsed.search.includes(baseProxyDomain) || parsed.hash.includes(baseProxyDomain)) {
-        const proxyDomainPattern = new RegExp(baseProxyDomain.replace(/\./g, '\\.'), 'g');
-        parsed.pathname = parsed.pathname.replace(proxyDomainPattern, targetDomain);
-        parsed.search = parsed.search.replace(proxyDomainPattern, targetDomain);
-        parsed.hash = parsed.hash.replace(proxyDomainPattern, targetDomain);
-        return parsed.toString();
-      }
-      
       // For all other (external) domains, do not rewrite
       return url;
     } catch {
