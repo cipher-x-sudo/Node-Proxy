@@ -168,6 +168,17 @@ async function proxyResource(targetUrl, req, res) {
         ...proxyRes.headers
       };
       
+      // Handle response errors (inside callback where proxyRes is available)
+      proxyRes.on('error', err => {
+        if (!res.headersSent) {
+          console.log(`${COLORS.error}[ERROR] API proxy response error for ${targetUrl}: ${err.message}${COLORS.reset}`);
+          res.status(502).json({ 
+            error: 'API proxy response error', 
+            message: err.message
+          });
+        }
+      });
+      
       // Rewrite redirect Location headers to go through proxy
       if (proxyRes.statusCode >= 300 && proxyRes.statusCode < 400 && headers.location) {
         try {
@@ -221,17 +232,6 @@ async function proxyResource(targetUrl, req, res) {
           message: err.message,
           targetUrl: targetUrl,
           originalUrl: req.originalUrl
-        });
-      }
-    });
-    
-    // Handle response errors
-    proxyRes?.on('error', err => {
-      if (!res.headersSent) {
-        console.log(`${COLORS.error}[ERROR] API proxy response error for ${targetUrl}: ${err.message}${COLORS.reset}`);
-        res.status(502).json({ 
-          error: 'API proxy response error', 
-          message: err.message
         });
       }
     });
