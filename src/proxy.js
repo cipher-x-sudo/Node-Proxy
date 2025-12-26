@@ -125,13 +125,40 @@ function injectScripts(html) {
   return $.html();
 }
 
-// NEW: Check if URL is an API request that should be unproxied
+// NEW: Check if URL is an API request that should be proxied
 function isApiRequest(targetUrl) {
   try {
     const url = new URL(targetUrl);
-    return url.hostname.startsWith('api.') || url.pathname.includes('/v1/graphql') || url.pathname.includes('/graphql');
+    const hostname = url.hostname.toLowerCase();
+    
+    // Check for API subdomains
+    if (hostname.startsWith('api.')) {
+      return true;
+    }
+    
+    // Check for GraphQL endpoints
+    if (url.pathname.includes('/graphql') || url.pathname.includes('/v1/graphql')) {
+      return true;
+    }
+    
+    // Check for specific API domains
+    const apiDomains = [
+      'braintreegateway.com',
+      'braintree-api.com',
+      'payments.braintree-api.com',
+      'api.braintreegateway.com'
+    ];
+    
+    return apiDomains.some(domain => hostname.includes(domain));
   } catch {
-    return targetUrl.includes('api.leonardo.ai') || targetUrl.includes('api.hostme360.tech') || targetUrl.includes('/v1/graphql') || targetUrl.includes('/graphql');
+    // Fallback string matching
+    const lowerUrl = targetUrl.toLowerCase();
+    return lowerUrl.includes('api.leonardo.ai') || 
+           lowerUrl.includes('api.hostme360.tech') || 
+           lowerUrl.includes('/v1/graphql') || 
+           lowerUrl.includes('/graphql') ||
+           lowerUrl.includes('braintreegateway.com') ||
+           lowerUrl.includes('braintree-api.com');
   }
 }
 
