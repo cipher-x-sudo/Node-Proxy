@@ -69,11 +69,9 @@
         return parsed.toString();
       }
 
-      // If the hostname is in skipRewriteDomains, do not rewrite
-      if (skipRewriteDomains.includes(parsed.hostname)) {
-        return url;
-      }
-
+      // Check cookiefirst.com and linkedin.com FIRST (before skipRewriteDomains)
+      // because we need to rewrite paths even if domain is in skipRewriteDomains
+      
       // Check if URL is for cookiefirst.com - replace proxy domain in path with target domain
       if (isCookiefirstDomain(parsed.hostname)) {
         // Replace proxy domain in the path with target domain
@@ -100,6 +98,11 @@
           parsed.search = replaceProxyDomainInString(parsed.search, proxyDomain, targetDomain);
         }
         return parsed.toString();
+      }
+
+      // If the hostname is in skipRewriteDomains, do not rewrite
+      if (skipRewriteDomains.includes(parsed.hostname)) {
+        return url;
       }
 
       if (shouldRewriteHost(parsed.hostname)) {

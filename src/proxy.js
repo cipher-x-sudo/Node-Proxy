@@ -2,13 +2,24 @@ const express = require('express');
 const puppeteer = require('puppeteer');
 const fs = require('fs');
 const path = require('path');
-const config = require('./config');
+const cookieParser = require('cookie-parser');
 const http = require('http');
 const https = require('https');
 const cheerio = require('cheerio');
 
+// Import config service and admin routes
+const { getConfig } = require('./services/config');
+const { initializeDatabase } = require('./db/connection');
+const { migrateConfig } = require('./db/migrations/migrate-config');
+const { router: authRouter, createDefaultAdmin } = require('./auth/routes');
+const adminRouter = require('./routes/admin');
+
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Load config (will use database with file fallback)
+// Start with file config for immediate use, then reload from database
+let config = require('./config');
 
 const COLORS = {
   request: '\x1b[36m',
@@ -47,7 +58,27 @@ if (require.main === module) {
   console.log(`\x1b[33m[COOKIES] Loaded ${cookieFiles.length} file(s), ${globalCookies.length} cookies\x1b[0m`);
 }
 
+// Middleware
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
+
+// Serve static assets
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
+app.use('/admin/assets', express.static(path.join(__dirname, 'admin/assets')));
+
+// Admin routes
+app.use('/api/admin/auth', authRouter);
+app.use('/api/admin', adminRouter);
+
+// Serve admin pages
+app.get('/admin/login', (req, res) => {
+  res.sendFile(path.join(__dirname, 'admin/login.html'));
+});
+
+app.get('/admin', (req, res) => {
+  res.sendFile(path.join(__dirname, 'admin/index.html'));
+});
 
 app.options(/.*/, (req, res) => {
   const origin = req.headers.origin;
@@ -416,24 +447,59 @@ app.use(async (req, res) => {
 module.exports = app;
 
 if (require.main === module) {
-  const shutdown = async () => {
-    console.log('\nShutting down gracefully...');
+  // Initialize database and start server
+  (async () => {
     try {
-      const browser = await browserPromise;
-      await browser.close();
-      console.log('Browser closed');
-      process.exit(0);
-    } catch (err) {
-      console.error('Error during shutdown:', err);
-      process.exit(1);
+      // Initialize database
+      await initializeDatabase();
+      
+      // Create default admin user
+      await createDefaultAdmin();
+      
+      // Migrate existing config to database (if not already migrated)
+      try {
+        await migrateConfig();
+      } catch (error) {
+        console.warn('Config migration skipped (may already be migrated):', error.message);
+      }
+      
+      // Reload config from database (will merge with env vars)
+      const dbConfig = await getConfig();
+      if (dbConfig) {
+        config = dbConfig;
+        console.log('Configuration loaded from database');
+      }
+      
+      const shutdown = async () => {
+        console.log('\nShutting down gracefully...');
+        try {
+          const browser = await browserPromise;
+          await browser.close();
+          console.log('Browser closed');
+          process.exit(0);
+        } catch (err) {
+          console.error('Error during shutdown:', err);
+          process.exit(1);
+        }
+      };
+
+      process.on('SIGINT', shutdown);
+      process.on('SIGTERM', shutdown);
+
+      // Use HTTP only - Railway handles HTTPS termination at the edge
+      app.listen(PORT, '0.0.0.0', () => {
+        console.log(`Proxy server running on http://0.0.0.0:${PORT}`);
+        console.log(`Admin panel available at http://0.0.0.0:${PORT}/admin`);
+      });
+    } catch (error) {
+      console.error('Failed to initialize:', error);
+      // Fallback to file config if database fails
+      console.log('Falling back to file-based configuration...');
+      config = require('./config');
+      
+      app.listen(PORT, '0.0.0.0', () => {
+        console.log(`Proxy server running on http://0.0.0.0:${PORT} (file config mode)`);
+      });
     }
-  };
-
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
-
-  // Use HTTP only - Railway handles HTTPS termination at the edge
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Proxy server running on http://0.0.0.0:${PORT}`);
-  });
+  })();
 }

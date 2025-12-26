@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Panel - Proxy Configuration</title>
+    <link rel="stylesheet" href="/admin/assets/admin.css">
+</head>
+<body>
+    <div class="admin-container">
+        <nav class="sidebar">
+            <div class="sidebar-header">
+                <h2>Proxy Admin</h2>
+            </div>
+            <ul class="nav-menu">
+                <li><a href="#" data-view="dashboard" class="nav-link active">Dashboard</a></li>
+                <li><a href="#" data-view="config" class="nav-link">Configuration</a></li>
+                <li><a href="#" data-view="history" class="nav-link">History</a></li>
+                <li><a href="#" data-view="users" class="nav-link">Users</a></li>
+            </ul>
+            <div class="sidebar-footer">
+                <button id="logoutBtn" class="logout-btn">Logout</button>
+            </div>
+        </nav>
+
+        <main class="main-content">
+            <header class="topbar">
+                <h1 id="pageTitle">Dashboard</h1>
+                <div class="user-info">
+                    <span id="currentUser">Loading...</span>
+                </div>
+            </header>
+
+            <div class="content-area">
+                <!-- Dashboard View -->
+                <div id="dashboard-view" class="view active">
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <h3>Configuration Entries</h3>
+                            <p class="stat-value" id="stat-config">-</p>
+                        </div>
+                        <div class="stat-card">
+                            <h3>Admin Users</h3>
+                            <p class="stat-value" id="stat-users">-</p>
+                        </div>
+                        <div class="stat-card">
+                            <h3>History Entries</h3>
+                            <p class="stat-value" id="stat-history">-</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Configuration View -->
+                <div id="config-view" class="view">
+                    <div class="config-editor">
+                        <div class="config-section">
+                            <h3>Basic Settings</h3>
+                            <div class="form-group">
+                                <label>Proxy Domain</label>
+                                <input type="text" id="config-proxyDomain" class="config-input">
+                            </div>
+                            <div class="form-group">
+                                <label>Target Domain</label>
+                                <input type="text" id="config-targetDomain" class="config-input">
+                            </div>
+                            <div class="form-group">
+                                <label>User Agent</label>
+                                <input type="text" id="config-userAgent" class="config-input">
+                            </div>
+                        </div>
+
+                        <div class="config-section">
+                            <h3>Proxy Settings</h3>
+                            <div class="form-group">
+                                <label>
+                                    <input type="checkbox" id="config-proxyEnabled" class="config-checkbox">
+                                    Proxy Enabled
+                                </label>
+                            </div>
+                            <div class="form-group">
+                                <label>Proxy Host</label>
+                                <input type="text" id="config-httpProxy.host" class="config-input">
+                            </div>
+                            <div class="form-group">
+                                <label>Proxy Port</label>
+                                <input type="number" id="config-httpProxy.port" class="config-input">
+                            </div>
+                            <div class="form-group">
+                                <label>Proxy Username</label>
+                                <input type="text" id="config-httpProxy.username" class="config-input">
+                            </div>
+                            <div class="form-group">
+                                <label>Proxy Password</label>
+                                <input type="password" id="config-httpProxy.password" class="config-input">
+                            </div>
+                        </div>
+
+                        <div class="config-section">
+                            <h3>Domain Lists</h3>
+                            <div class="form-group">
+                                <label>Skip Rewrite Domains (one per line)</label>
+                                <textarea id="config-skipRewriteDomains" class="config-textarea" rows="5"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label>No Credentials Domains (one per line)</label>
+                                <textarea id="config-noCredentialsDomains" class="config-textarea" rows="5"></textarea>
+                            </div>
+                        </div>
+
+                        <div class="config-section">
+                            <h3>Other Settings</h3>
+                            <div class="form-group">
+                                <label>
+                                    <input type="checkbox" id="config-rewriteStatic" class="config-checkbox">
+                                    Rewrite Static
+                                </label>
+                            </div>
+                            <div class="form-group">
+                                <label>
+                                    <input type="checkbox" id="config-injectS1" class="config-checkbox">
+                                    Inject S1
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="form-actions">
+                            <button id="saveConfigBtn" class="btn btn-primary">Save Configuration</button>
+                            <button id="reloadConfigBtn" class="btn btn-secondary">Reload Cache</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- History View -->
+                <div id="history-view" class="view">
+                    <div class="history-list">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Key</th>
+                                    <th>Old Value</th>
+                                    <th>New Value</th>
+                                    <th>Changed By</th>
+                                    <th>Changed At</th>
+                                </tr>
+                            </thead>
+                            <tbody id="historyTableBody">
+                                <tr><td colspan="5">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Users View -->
+                <div id="users-view" class="view">
+                    <div class="users-section">
+                        <h3>Create New User</h3>
+                        <div class="form-group">
+                            <label>Username</label>
+                            <input type="text" id="newUsername" class="config-input">
+                        </div>
+                        <div class="form-group">
+                            <label>Password</label>
+                            <input type="password" id="newPassword" class="config-input">
+                        </div>
+                        <button id="createUserBtn" class="btn btn-primary">Create User</button>
+                    </div>
+                    <div class="users-list">
+                        <h3>Existing Users</h3>
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Username</th>
+                                    <th>Created At</th>
+                                </tr>
+                            </thead>
+                            <tbody id="usersTableBody">
+                                <tr><td colspan="3">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <div id="notification" class="notification"></div>
+    <script src="/admin/assets/admin.js"></script>
+</body>
+</html>
+
