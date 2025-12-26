@@ -214,7 +214,14 @@ function proxyResource(targetUrl, req, res) {
     
     proxyReq.on('error', err => {
       console.log(`${COLORS.error}[ERROR] API proxy error for ${targetUrl}: ${err.message}${COLORS.reset}`);
-      res.status(502).end('API proxy error: ' + err.message);
+      console.log(`${COLORS.error}[ERROR] Original request: ${req.method} ${req.originalUrl}${COLORS.reset}`);
+      console.log(`${COLORS.error}[ERROR] Error details: ${JSON.stringify({ code: err.code, errno: err.errno, syscall: err.syscall })}${COLORS.reset}`);
+      res.status(502).json({ 
+        error: 'API proxy error', 
+        message: err.message,
+        targetUrl: targetUrl,
+        originalUrl: req.originalUrl
+      });
     });
     
     if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') {

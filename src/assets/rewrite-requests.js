@@ -54,8 +54,33 @@
 
   function replaceProxyDomainInString(str, proxyDomain, targetDomain) {
     // Replace proxy domain with target domain in a string (handles both encoded and unencoded)
-    const proxyDomainPattern = new RegExp(proxyDomain.replace(/\./g, '\\.'), 'g');
-    return str.replace(proxyDomainPattern, targetDomain);
+    // Also handle subdomains (e.g., app.hostme360.tech -> app.leonardo.ai)
+    const baseProxyDomain = proxyDomain.split(':')[0]; // Remove port if present
+    const baseTargetDomain = targetDomain.split(':')[0]; // Remove port if present
+    
+    // Match the base domain or any subdomain of it
+    // Pattern: (subdomain.)?baseDomain
+    const domainParts = baseProxyDomain.split('.');
+    if (domainParts.length >= 2) {
+      // Match any subdomain pattern like app.hostme360.tech, api.hostme360.tech, etc.
+      const basePattern = domainParts.slice(-2).join('\\.'); // e.g., hostme360\.tech
+      const subdomainPattern = `([a-zA-Z0-9-]+\\.)?${basePattern}`;
+      const regex = new RegExp(subdomainPattern, 'g');
+      
+      return str.replace(regex, (match) => {
+        // Extract subdomain if present
+        const subdomainMatch = match.match(/^([a-zA-Z0-9-]+)\./);
+        if (subdomainMatch) {
+          const subdomain = subdomainMatch[1];
+          return `${subdomain}.${baseTargetDomain}`;
+        }
+        return baseTargetDomain;
+      });
+    }
+    
+    // Fallback to simple replacement
+    const proxyDomainPattern = new RegExp(baseProxyDomain.replace(/\./g, '\\.'), 'g');
+    return str.replace(proxyDomainPattern, baseTargetDomain);
   }
 
   function rewriteUrl(url) {
