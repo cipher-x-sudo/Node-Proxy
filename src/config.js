@@ -28,6 +28,7 @@ module.exports = {
     'events.launchdarkly.com',
     'c.adora-cdn.com',
     'consent.cookiefirst.com',
+    'linkedin.com',
     'consent-eu.cookiefirst.com',
     'cookiefirst.com', // Match all cookiefirst.com subdomains
     'braze.com', // Match all braze.com subdomains (e.g., sdk.iad-07.braze.com)
