@@ -59,6 +59,18 @@
         // (No more /proxy-external rewrite)
         return url;
       }
+      
+      // For external domains: if path contains proxy domain, replace with target domain
+      // This fixes cases where the server generated URLs with the proxy domain in the path
+      const baseProxyDomain = proxyDomain.split(':')[0]; // Remove port if present
+      if (parsed.pathname.includes(baseProxyDomain) || parsed.search.includes(baseProxyDomain) || parsed.hash.includes(baseProxyDomain)) {
+        const proxyDomainPattern = new RegExp(baseProxyDomain.replace(/\./g, '\\.'), 'g');
+        parsed.pathname = parsed.pathname.replace(proxyDomainPattern, targetDomain);
+        parsed.search = parsed.search.replace(proxyDomainPattern, targetDomain);
+        parsed.hash = parsed.hash.replace(proxyDomainPattern, targetDomain);
+        return parsed.toString();
+      }
+      
       // For all other (external) domains, do not rewrite
       return url;
     } catch {

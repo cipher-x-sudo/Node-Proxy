@@ -20,7 +20,6 @@ module.exports = {
 
   skipRewriteDomains: [
     'consent.cookiefirst.com'
-    
   ],
   // Domains for which credentials (cookies, etc) should NOT be sent
   noCredentialsDomains: [
