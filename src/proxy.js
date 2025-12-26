@@ -148,8 +148,10 @@ function proxyResource(targetUrl, req, res) {
             const sub = parseSubdomainFromHost(redirectUrl.hostname, config.targetDomain);
             // Determine protocol from request or default to https
             const protocol = (req.secure || req.headers['x-forwarded-proto'] === 'https' || req.headers['x-forwarded-ssl'] === 'on') ? 'https' : 'http';
-            const proxyHost = req.headers.host || config.proxyDomain;
-            const newHost = sub ? `${sub}.${proxyHost}` : proxyHost;
+            // Get base proxy domain (remove port if present, and remove any existing subdomain)
+            const baseProxyDomain = config.proxyDomain.split(':')[0]; // Remove port if present
+            // Build new host with subdomain if present
+            const newHost = sub ? `${sub}.${baseProxyDomain}` : baseProxyDomain;
             headers.location = `${protocol}://${newHost}${redirectUrl.pathname}${redirectUrl.search}${redirectUrl.hash}`;
             console.log(`${COLORS.proxy}[PROXY] Rewrote API redirect: ${redirectUrl.toString()} -> ${headers.location}${COLORS.reset}`);
           }
@@ -256,8 +258,10 @@ function proxyResource(targetUrl, req, res) {
           const sub = parseSubdomainFromHost(redirectUrl.hostname, config.targetDomain);
           // Determine protocol from request or default to https
           const protocol = (req.secure || req.headers['x-forwarded-proto'] === 'https' || req.headers['x-forwarded-ssl'] === 'on') ? 'https' : 'http';
-          const proxyHost = req.headers.host || config.proxyDomain;
-          const newHost = sub ? `${sub}.${proxyHost}` : proxyHost;
+          // Get base proxy domain (remove port if present, and remove any existing subdomain)
+          const baseProxyDomain = config.proxyDomain.split(':')[0]; // Remove port if present
+          // Build new host with subdomain if present
+          const newHost = sub ? `${sub}.${baseProxyDomain}` : baseProxyDomain;
           headers.location = `${protocol}://${newHost}${redirectUrl.pathname}${redirectUrl.search}${redirectUrl.hash}`;
           console.log(`${COLORS.proxy}[PROXY] Rewrote redirect: ${redirectUrl.toString()} -> ${headers.location}${COLORS.reset}`);
         }
