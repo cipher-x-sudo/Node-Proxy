@@ -139,6 +139,25 @@ function proxyResource(targetUrl, req, res) {
         ...proxyRes.headers
       };
       
+      // Rewrite redirect Location headers to go through proxy
+      if (proxyRes.statusCode >= 300 && proxyRes.statusCode < 400 && headers.location) {
+        try {
+          const redirectUrl = new URL(headers.location, targetUrl);
+          // Check if redirect is to target domain
+          if (redirectUrl.hostname === config.targetDomain || redirectUrl.hostname.endsWith('.' + config.targetDomain)) {
+            const sub = parseSubdomainFromHost(redirectUrl.hostname, config.targetDomain);
+            // Determine protocol from request or default to https
+            const protocol = (req.secure || req.headers['x-forwarded-proto'] === 'https' || req.headers['x-forwarded-ssl'] === 'on') ? 'https' : 'http';
+            const proxyHost = req.headers.host || config.proxyDomain;
+            const newHost = sub ? `${sub}.${proxyHost}` : proxyHost;
+            headers.location = `${protocol}://${newHost}${redirectUrl.pathname}${redirectUrl.search}${redirectUrl.hash}`;
+            console.log(`${COLORS.proxy}[PROXY] Rewrote API redirect: ${redirectUrl.toString()} -> ${headers.location}${COLORS.reset}`);
+          }
+        } catch (err) {
+          console.log(`${COLORS.error}[ERROR] Failed to rewrite API redirect location: ${err.message}${COLORS.reset}`);
+        }
+      }
+      
       // Set CORS headers - must use specific origin when credentials are enabled
       if (req.headers.origin) {
         headers['access-control-allow-origin'] = req.headers.origin;
@@ -228,6 +247,25 @@ function proxyResource(targetUrl, req, res) {
   const proxyReq = client.request(targetUrl, requestOptions, proxyRes => {
     const headers = { ...proxyRes.headers };
     
+    // Rewrite redirect Location headers to go through proxy
+    if (proxyRes.statusCode >= 300 && proxyRes.statusCode < 400 && headers.location) {
+      try {
+        const redirectUrl = new URL(headers.location, targetUrl);
+        // Check if redirect is to target domain
+        if (redirectUrl.hostname === config.targetDomain || redirectUrl.hostname.endsWith('.' + config.targetDomain)) {
+          const sub = parseSubdomainFromHost(redirectUrl.hostname, config.targetDomain);
+          // Determine protocol from request or default to https
+          const protocol = (req.secure || req.headers['x-forwarded-proto'] === 'https' || req.headers['x-forwarded-ssl'] === 'on') ? 'https' : 'http';
+          const proxyHost = req.headers.host || config.proxyDomain;
+          const newHost = sub ? `${sub}.${proxyHost}` : proxyHost;
+          headers.location = `${protocol}://${newHost}${redirectUrl.pathname}${redirectUrl.search}${redirectUrl.hash}`;
+          console.log(`${COLORS.proxy}[PROXY] Rewrote redirect: ${redirectUrl.toString()} -> ${headers.location}${COLORS.reset}`);
+        }
+      } catch (err) {
+        console.log(`${COLORS.error}[ERROR] Failed to rewrite redirect location: ${err.message}${COLORS.reset}`);
+      }
+    }
+    
     // Always set CORS headers if origin is present
     if (req.headers.origin) {
       headers['access-control-allow-origin'] = req.headers.origin;
@@ -250,6 +288,8 @@ function proxyResource(targetUrl, req, res) {
     
     if (proxyRes.statusCode >= 200 && proxyRes.statusCode < 300) {
       console.log(`${COLORS.puppeteer}[SUCCESS] ${req.method} ${targetUrl} -> ${proxyRes.statusCode}${COLORS.reset}`);
+    } else if (proxyRes.statusCode >= 300 && proxyRes.statusCode < 400) {
+      console.log(`${COLORS.proxy}[REDIRECT] ${req.method} ${targetUrl} -> ${proxyRes.statusCode} ${headers.location}${COLORS.reset}`);
     } else {
       console.log(`${COLORS.error}[FAILED] ${req.method} ${targetUrl} -> ${proxyRes.statusCode}${COLORS.reset}`);
     }
