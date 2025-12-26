@@ -30,6 +30,7 @@ module.exports = {
     'consent.cookiefirst.com',
     'consent-eu.cookiefirst.com',
     'cookiefirst.com', // Match all cookiefirst.com subdomains
+    'braze.com', // Match all braze.com subdomains (e.g., sdk.iad-07.braze.com)
     'api.leonardo.ai'
   ]
 }; 
