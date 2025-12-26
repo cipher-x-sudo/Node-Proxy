@@ -28,6 +28,8 @@ module.exports = {
     'events.launchdarkly.com',
     'c.adora-cdn.com',
     'consent.cookiefirst.com',
+    'consent-eu.cookiefirst.com',
+    'cookiefirst.com', // Match all cookiefirst.com subdomains
     'api.leonardo.ai'
   ]
 }; 

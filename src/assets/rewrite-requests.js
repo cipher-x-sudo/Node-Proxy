@@ -69,9 +69,20 @@
   function isNoCredentialsDomain(url) {
     try {
       const parsed = new URL(url);
-      return noCredentialsDomains.some(domain => 
-        parsed.hostname === domain || parsed.hostname.endsWith(`.${domain}`)
-      );
+      return noCredentialsDomains.some(domain => {
+        // Exact match
+        if (parsed.hostname === domain) return true;
+        // Subdomain match (e.g., consent-eu.cookiefirst.com matches cookiefirst.com)
+        // Check if hostname ends with the domain (as subdomain or exact match)
+        const domainParts = domain.split('.');
+        const hostnameParts = parsed.hostname.split('.');
+        // Check if the last N parts of hostname match the domain parts
+        if (hostnameParts.length >= domainParts.length) {
+          const hostnameSuffix = hostnameParts.slice(-domainParts.length).join('.');
+          if (hostnameSuffix === domain) return true;
+        }
+        return false;
+      });
     } catch {
       return false;
     }
