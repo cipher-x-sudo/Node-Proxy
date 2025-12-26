@@ -71,6 +71,7 @@ function showView(viewName) {
     const titles = {
         dashboard: 'Dashboard',
         config: 'Configuration',
+        cookies: 'Cookies',
         history: 'History',
         users: 'Users',
     };
@@ -81,6 +82,8 @@ function showView(viewName) {
         loadDashboard();
     } else if (viewName === 'config') {
         loadConfig();
+    } else if (viewName === 'cookies') {
+        loadCookies();
     } else if (viewName === 'history') {
         loadHistory();
     } else if (viewName === 'users') {
@@ -250,6 +253,191 @@ document.getElementById('createUserBtn').addEventListener('click', async () => {
             loadUsers();
         } else {
             showNotification(data.error || 'Failed to create user', true);
+        }
+    }
+});
+
+// Cookies
+let editingCookieId = null;
+
+async function loadCookies() {
+    const response = await apiRequest('/cookies');
+    if (response) {
+        const data = await response.json();
+        const tbody = document.getElementById('cookiesTableBody');
+        
+        if (data.cookies.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="9">No cookies found</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = data.cookies.map(cookie => {
+            const expires = cookie.expires ? new Date(cookie.expires * 1000).toLocaleString() : 'Session';
+            const valueDisplay = cookie.value.length > 50 ? cookie.value.substring(0, 50) + '...' : cookie.value;
+            return `
+                <tr>
+                    <td>${cookie.name}</td>
+                    <td><code title="${cookie.value}">${valueDisplay}</code></td>
+                    <td>${cookie.domain || '-'}</td>
+                    <td>${cookie.path || '/'}</td>
+                    <td>${expires}</td>
+                    <td>${cookie.httpOnly ? '✓' : ''}</td>
+                    <td>${cookie.secure ? '✓' : ''}</td>
+                    <td>${cookie.sameSite || 'Lax'}</td>
+                    <td>
+                        <button class="btn-edit" onclick="editCookie(${JSON.stringify(cookie).replace(/"/g, '&quot;')})">Edit</button>
+                        <button class="btn-delete" onclick="deleteCookieById(${cookie.id || 'null'})">Delete</button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    }
+}
+
+function editCookie(cookie) {
+    editingCookieId = cookie.id;
+    document.getElementById('cookieFormTitle').textContent = 'Edit Cookie';
+    document.getElementById('cookie-id').value = cookie.id || '';
+    document.getElementById('cookie-name').value = cookie.name || '';
+    document.getElementById('cookie-value').value = cookie.value || '';
+    document.getElementById('cookie-domain').value = cookie.domain || '';
+    document.getElementById('cookie-path').value = cookie.path || '/';
+    document.getElementById('cookie-expires').value = cookie.expires || '';
+    document.getElementById('cookie-httpOnly').checked = cookie.httpOnly || false;
+    document.getElementById('cookie-secure').checked = cookie.secure || false;
+    document.getElementById('cookie-sameSite').value = cookie.sameSite || 'Lax';
+    document.getElementById('cookieForm').style.display = 'block';
+}
+
+function resetCookieForm() {
+    editingCookieId = null;
+    document.getElementById('cookieFormTitle').textContent = 'Add Cookie';
+    document.getElementById('cookieForm').reset();
+    document.getElementById('cookie-id').value = '';
+    document.getElementById('cookie-path').value = '/';
+    document.getElementById('cookie-sameSite').value = 'Lax';
+    document.getElementById('cookieForm').style.display = 'none';
+}
+
+// Make functions global for onclick handlers
+window.editCookie = editCookie;
+window.deleteCookieById = async (id) => {
+    if (!confirm('Are you sure you want to delete this cookie?')) return;
+    
+    const response = await apiRequest(`/cookies/${id}`, { method: 'DELETE' });
+    if (response) {
+        const data = await response.json();
+        if (data.success) {
+            showNotification('Cookie deleted successfully!');
+            loadCookies();
+        } else {
+            showNotification(data.error || 'Failed to delete cookie', true);
+        }
+    }
+};
+
+// Add cookie button
+document.getElementById('addCookieBtn').addEventListener('click', () => {
+    resetCookieForm();
+    document.getElementById('cookieForm').style.display = 'block';
+});
+
+// Cancel cookie form
+document.getElementById('cancelCookieBtn').addEventListener('click', () => {
+    resetCookieForm();
+});
+
+// Save cookie
+document.getElementById('saveCookieBtn').addEventListener('click', async () => {
+    const cookieData = {
+        name: document.getElementById('cookie-name').value,
+        value: document.getElementById('cookie-value').value,
+        domain: document.getElementById('cookie-domain').value || null,
+        path: document.getElementById('cookie-path').value || '/',
+        expires: document.getElementById('cookie-expires').value ? parseInt(document.getElementById('cookie-expires').value) : null,
+        httpOnly: document.getElementById('cookie-httpOnly').checked,
+        secure: document.getElementById('cookie-secure').checked,
+        sameSite: document.getElementById('cookie-sameSite').value,
+    };
+
+    if (!cookieData.name || !cookieData.value) {
+        showNotification('Cookie name and value are required', true);
+        return;
+    }
+
+    const cookieId = document.getElementById('cookie-id').value;
+    const url = cookieId ? `/cookies/${cookieId}` : '/cookies';
+    const method = cookieId ? 'PUT' : 'POST';
+
+    const response = await apiRequest(url, {
+        method: method,
+        body: JSON.stringify(cookieData),
+    });
+
+    if (response) {
+        const data = await response.json();
+        if (data.success) {
+            showNotification(`Cookie ${data.action} successfully!`);
+            resetCookieForm();
+            loadCookies();
+        } else {
+            showNotification(data.error || 'Failed to save cookie', true);
+        }
+    }
+});
+
+// Import cookies from JSON
+document.getElementById('importCookiesBtn').addEventListener('click', () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        try {
+            const text = await file.text();
+            const cookies = JSON.parse(text);
+            
+            if (!Array.isArray(cookies)) {
+                showNotification('Invalid JSON format. Expected an array of cookies.', true);
+                return;
+            }
+
+            const response = await apiRequest('/cookies/bulk', {
+                method: 'POST',
+                body: JSON.stringify({ cookies }),
+            });
+
+            if (response) {
+                const data = await response.json();
+                if (data.success) {
+                    const successCount = data.results.filter(r => r.success).length;
+                    showNotification(`Imported ${successCount} cookie(s) successfully!`);
+                    loadCookies();
+                } else {
+                    showNotification(data.error || 'Failed to import cookies', true);
+                }
+            }
+        } catch (error) {
+            showNotification('Failed to parse JSON file: ' + error.message, true);
+        }
+    };
+    input.click();
+});
+
+// Delete all cookies
+document.getElementById('deleteAllCookiesBtn').addEventListener('click', async () => {
+    if (!confirm('Are you sure you want to delete ALL cookies? This cannot be undone.')) return;
+
+    const response = await apiRequest('/cookies', { method: 'DELETE' });
+    if (response) {
+        const data = await response.json();
+        if (data.success) {
+            showNotification('All cookies deleted successfully!');
+            loadCookies();
+        } else {
+            showNotification(data.error || 'Failed to delete cookies', true);
         }
     }
 });

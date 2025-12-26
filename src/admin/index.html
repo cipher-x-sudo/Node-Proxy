@@ -15,6 +15,7 @@
             <ul class="nav-menu">
                 <li><a href="#" data-view="dashboard" class="nav-link active">Dashboard</a></li>
                 <li><a href="#" data-view="config" class="nav-link">Configuration</a></li>
+                <li><a href="#" data-view="cookies" class="nav-link">Cookies</a></li>
                 <li><a href="#" data-view="history" class="nav-link">History</a></li>
                 <li><a href="#" data-view="users" class="nav-link">Users</a></li>
             </ul>
@@ -147,6 +148,90 @@
                                 <tr><td colspan="5">Loading...</td></tr>
                             </tbody>
                         </table>
+                    </div>
+                </div>
+
+                <!-- Cookies View -->
+                <div id="cookies-view" class="view">
+                    <div class="cookies-section">
+                        <div class="section-header">
+                            <h3>Cookie Management</h3>
+                            <div class="header-actions">
+                                <button id="addCookieBtn" class="btn btn-primary">Add Cookie</button>
+                                <button id="importCookiesBtn" class="btn btn-secondary">Import JSON</button>
+                                <button id="deleteAllCookiesBtn" class="btn btn-danger">Delete All</button>
+                            </div>
+                        </div>
+                        
+                        <div id="cookieForm" class="cookie-form" style="display: none;">
+                            <h4 id="cookieFormTitle">Add Cookie</h4>
+                            <input type="hidden" id="cookie-id">
+                            <div class="form-group">
+                                <label>Name *</label>
+                                <input type="text" id="cookie-name" class="config-input" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Value *</label>
+                                <input type="text" id="cookie-value" class="config-input" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Domain</label>
+                                <input type="text" id="cookie-domain" class="config-input" placeholder="example.com">
+                            </div>
+                            <div class="form-group">
+                                <label>Path</label>
+                                <input type="text" id="cookie-path" class="config-input" value="/">
+                            </div>
+                            <div class="form-group">
+                                <label>Expires (Unix timestamp)</label>
+                                <input type="number" id="cookie-expires" class="config-input" placeholder="Optional">
+                            </div>
+                            <div class="form-group">
+                                <label>
+                                    <input type="checkbox" id="cookie-httpOnly" class="config-checkbox">
+                                    HttpOnly
+                                </label>
+                            </div>
+                            <div class="form-group">
+                                <label>
+                                    <input type="checkbox" id="cookie-secure" class="config-checkbox">
+                                    Secure
+                                </label>
+                            </div>
+                            <div class="form-group">
+                                <label>SameSite</label>
+                                <select id="cookie-sameSite" class="config-input">
+                                    <option value="Lax">Lax</option>
+                                    <option value="Strict">Strict</option>
+                                    <option value="None">None</option>
+                                </select>
+                            </div>
+                            <div class="form-actions">
+                                <button id="saveCookieBtn" class="btn btn-primary">Save Cookie</button>
+                                <button id="cancelCookieBtn" class="btn btn-secondary">Cancel</button>
+                            </div>
+                        </div>
+
+                        <div class="cookies-list">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Name</th>
+                                        <th>Value</th>
+                                        <th>Domain</th>
+                                        <th>Path</th>
+                                        <th>Expires</th>
+                                        <th>HttpOnly</th>
+                                        <th>Secure</th>
+                                        <th>SameSite</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="cookiesTableBody">
+                                    <tr><td colspan="9">Loading...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
 

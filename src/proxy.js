@@ -13,6 +13,7 @@ const { initializeDatabase } = require('./db/connection');
 const { migrateConfig } = require('./db/migrations/migrate-config');
 const { router: authRouter, createDefaultAdmin } = require('./auth/routes');
 const adminRouter = require('./routes/admin');
+const { getCookies, migrateCookies } = require('./services/cookies');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -42,34 +43,23 @@ let browserPromise = puppeteer.launch({
   headless: 'new',
 });
 
-// Read cookie files from src directory (where this file is located)
-const cookieDir = __dirname;
-const cookieFiles = fs.readdirSync(cookieDir).filter(f => f.startsWith('cookies') && f.endsWith('.json'));
-const globalCookies = [];
-for (const file of cookieFiles) {
-  try {
-    const filePath = path.join(cookieDir, file);
-    const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-    if (Array.isArray(data)) globalCookies.push(...data);
-  } catch {}
-}
+// Cookies will be loaded from database with file fallback
+// Use getCookies() function to get fresh cookies (with caching)
 
-if (require.main === module) {
-  console.log(`\x1b[33m[COOKIES] Loaded ${cookieFiles.length} file(s), ${globalCookies.length} cookies\x1b[0m`);
-}
-
-// Middleware
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Middleware - only parse JSON for admin routes, not for proxy routes
 app.use(cookieParser());
+
+// Body parsing for admin routes only (will be applied before admin routes)
+const bodyParser = express.json({ limit: '50mb' });
+const urlEncodedParser = express.urlencoded({ extended: true, limit: '50mb' });
 
 // Serve static assets
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
 app.use('/admin/assets', express.static(path.join(__dirname, 'admin/assets')));
 
-// Admin routes
-app.use('/api/admin/auth', authRouter);
-app.use('/api/admin', adminRouter);
+// Admin routes (with body parsing)
+app.use('/api/admin/auth', bodyParser, urlEncodedParser, authRouter);
+app.use('/api/admin', bodyParser, urlEncodedParser, adminRouter);
 
 // Serve admin pages
 app.get('/admin/login', (req, res) => {
@@ -145,7 +135,7 @@ function isApiRequest(targetUrl) {
   }
 }
 
-function proxyResource(targetUrl, req, res) {
+async function proxyResource(targetUrl, req, res) {
   console.log(`${COLORS.proxy}[PROXY] Resource: ${req.method} ${req.originalUrl} -> ${targetUrl}${COLORS.reset}`);
   
   // NEW: Special handling for API requests
@@ -154,16 +144,24 @@ function proxyResource(targetUrl, req, res) {
     
     const client = targetUrl.startsWith('https') ? https : http;
     
+    // Prepare headers - remove headers that shouldn't be forwarded
+    const headers = { ...req.headers };
+    delete headers.host;
+    delete headers['content-length']; // Let Node.js calculate this
+    delete headers['connection'];
+    delete headers['transfer-encoding'];
+    
+    // Set user agent if not present
+    if (!headers['user-agent']) {
+      headers['user-agent'] = config.userAgent;
+    }
+    
     const requestOptions = {
       method: req.method,
-      headers: {
-        ...req.headers,
-        'user-agent': req.headers['user-agent'] || config.userAgent,
-      },
-      rejectUnauthorized: false
+      headers: headers,
+      rejectUnauthorized: false,
+      timeout: 30000, // 30 second timeout
     };
-    
-    delete requestOptions.headers.host;
     
     const proxyReq = client.request(targetUrl, requestOptions, proxyRes => {
       const headers = { 
@@ -212,20 +210,68 @@ function proxyResource(targetUrl, req, res) {
       proxyRes.pipe(res);
     });
     
+    // Handle request errors
     proxyReq.on('error', err => {
-      console.log(`${COLORS.error}[ERROR] API proxy error for ${targetUrl}: ${err.message}${COLORS.reset}`);
-      console.log(`${COLORS.error}[ERROR] Original request: ${req.method} ${req.originalUrl}${COLORS.reset}`);
-      console.log(`${COLORS.error}[ERROR] Error details: ${JSON.stringify({ code: err.code, errno: err.errno, syscall: err.syscall })}${COLORS.reset}`);
-      res.status(502).json({ 
-        error: 'API proxy error', 
-        message: err.message,
-        targetUrl: targetUrl,
-        originalUrl: req.originalUrl
-      });
+      if (!res.headersSent) {
+        console.log(`${COLORS.error}[ERROR] API proxy error for ${targetUrl}: ${err.message}${COLORS.reset}`);
+        console.log(`${COLORS.error}[ERROR] Original request: ${req.method} ${req.originalUrl}${COLORS.reset}`);
+        console.log(`${COLORS.error}[ERROR] Error details: ${JSON.stringify({ code: err.code, errno: err.errno, syscall: err.syscall })}${COLORS.reset}`);
+        res.status(502).json({ 
+          error: 'API proxy error', 
+          message: err.message,
+          targetUrl: targetUrl,
+          originalUrl: req.originalUrl
+        });
+      }
     });
     
-    if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') {
-      req.pipe(proxyReq);
+    // Handle response errors
+    proxyRes?.on('error', err => {
+      if (!res.headersSent) {
+        console.log(`${COLORS.error}[ERROR] API proxy response error for ${targetUrl}: ${err.message}${COLORS.reset}`);
+        res.status(502).json({ 
+          error: 'API proxy response error', 
+          message: err.message
+        });
+      }
+    });
+    
+    // Handle client disconnect
+    req.on('aborted', () => {
+      proxyReq.destroy();
+    });
+    
+    res.on('close', () => {
+      proxyReq.destroy();
+    });
+    
+    // Forward request body for POST/PUT/PATCH
+    if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH' || req.method === 'DELETE') {
+      // Check if there's a content-length header
+      const contentLength = req.headers['content-length'];
+      
+      if (contentLength && parseInt(contentLength) > 0) {
+        // If body was already parsed by middleware, write it manually
+        if (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) {
+          const bodyStr = JSON.stringify(req.body);
+          requestOptions.headers['content-length'] = Buffer.byteLength(bodyStr);
+          proxyReq.write(bodyStr);
+          proxyReq.end();
+        } else {
+          // Pipe the raw request stream
+          req.on('error', err => {
+            if (!res.headersSent) {
+              console.log(`${COLORS.error}[ERROR] Request stream error: ${err.message}${COLORS.reset}`);
+              proxyReq.destroy();
+            }
+          });
+          
+          req.pipe(proxyReq, { end: true });
+        }
+      } else {
+        // No body, just end the request
+        proxyReq.end();
+      }
     } else {
       proxyReq.end();
     }
@@ -244,8 +290,11 @@ function proxyResource(targetUrl, req, res) {
   const skipCredentials = Array.isArray(config.noCredentialsDomains) && 
                          config.noCredentialsDomains.includes(targetHostname);
   
-  if (!skipCredentials && globalCookies.length) {
-    mergedCookie = globalCookies.map(c => `${c.name}=${c.value}`).join('; ');
+  if (!skipCredentials) {
+    const cookies = await getCookies();
+    if (cookies.length) {
+      mergedCookie = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+    }
   }
   if (!skipCredentials && req.headers.cookie) {
     mergedCookie = mergedCookie
@@ -385,7 +434,7 @@ app.use(async (req, res) => {
 
   // NEW: Handle API requests immediately
   if (isApiRequest(targetUrl)) {
-    proxyResource(targetUrl, req, res);
+    await proxyResource(targetUrl, req, res);
     return;
   }
 
@@ -394,9 +443,10 @@ app.use(async (req, res) => {
     const page = await browser.newPage();
     await page.setUserAgent(config.userAgent);
     
-    if (globalCookies.length) {
+    const cookies = await getCookies();
+    if (cookies.length) {
       try {
-        await page.setCookie(...globalCookies);
+        await page.setCookie(...cookies);
         console.log(COLORS.puppeteer + '[PUPPETEER] Cookies set for page' + COLORS.reset);
       } catch (e) {
         console.log(COLORS.error + '[ERROR] Failed to set cookies for page: ' + e.message + COLORS.reset);
@@ -446,7 +496,7 @@ app.use(async (req, res) => {
     res.status(200).send(body);
     await page.close();
   } else {
-    proxyResource(targetUrl, req, res);
+    await proxyResource(targetUrl, req, res);
     return;
   }
 });
@@ -476,6 +526,10 @@ if (require.main === module) {
         config = dbConfig;
         console.log('Configuration loaded from database');
       }
+      
+      // Load cookies from database (for initial count)
+      const initialCookies = await getCookies();
+      console.log(`\x1b[33m[COOKIES] Loaded ${initialCookies.length} cookie(s) from database\x1b[0m`);
       
       const shutdown = async () => {
         console.log('\nShutting down gracefully...');
