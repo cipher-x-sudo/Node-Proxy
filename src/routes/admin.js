@@ -2,8 +2,8 @@ const express = require('express');
 const bcrypt = require('bcrypt');
 const { pool } = require('../db/connection');
 const { requireAuth } = require('../auth/middleware');
-const { getConfig, updateConfig, getConfigHistory, invalidateCache } = require('../services/config');
-const { getCookies, upsertCookie, deleteCookie, deleteAllCookies, invalidateCache } = require('../services/cookies');
+const { getConfig, updateConfig, getConfigHistory, invalidateCache: invalidateConfigCache } = require('../services/config');
+const { getCookies, upsertCookie, deleteCookie, deleteAllCookies, invalidateCache: invalidateCookieCache } = require('../services/cookies');
 
 const router = express.Router();
 
@@ -165,7 +165,7 @@ router.get('/users', async (req, res) => {
  */
 router.post('/config/reload', async (req, res) => {
   try {
-    invalidateCache();
+    invalidateConfigCache();
     await getConfig(); // Reload
     res.json({ success: true, message: 'Configuration cache reloaded' });
   } catch (error) {
@@ -199,7 +199,7 @@ router.post('/cookies', async (req, res) => {
     }
 
     const result = await upsertCookie(cookieData, req.user.userId);
-    invalidateCache(); // Invalidate cache after update
+    invalidateCookieCache(); // Invalidate cache after update
     res.json({ success: true, ...result });
   } catch (error) {
     console.error('Upsert cookie error:', error);
@@ -222,7 +222,7 @@ router.put('/cookies/:id', async (req, res) => {
     }
 
     const result = await upsertCookie({ ...cookieData, id }, req.user.userId);
-    invalidateCache(); // Invalidate cache after update
+    invalidateCookieCache(); // Invalidate cache after update
     res.json({ success: true, ...result });
   } catch (error) {
     console.error('Update cookie error:', error);
@@ -237,6 +237,7 @@ router.delete('/cookies/:id', async (req, res) => {
   try {
     const { id } = req.params;
     await deleteCookie(id);
+    invalidateCookieCache(); // Invalidate cache after delete
     res.json({ success: true, message: 'Cookie deleted' });
   } catch (error) {
     console.error('Delete cookie error:', error);
@@ -250,6 +251,7 @@ router.delete('/cookies/:id', async (req, res) => {
 router.delete('/cookies', async (req, res) => {
   try {
     await deleteAllCookies();
+    invalidateCookieCache(); // Invalidate cache after delete all
     res.json({ success: true, message: 'All cookies deleted' });
   } catch (error) {
     console.error('Delete all cookies error:', error);
@@ -278,7 +280,7 @@ router.post('/cookies/bulk', async (req, res) => {
       }
     }
 
-    invalidateCache(); // Invalidate cache after bulk import
+    invalidateCookieCache(); // Invalidate cache after bulk import
     res.json({ success: true, results });
   } catch (error) {
     console.error('Bulk import cookies error:', error);
