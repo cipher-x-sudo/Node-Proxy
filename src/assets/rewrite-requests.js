@@ -47,6 +47,17 @@
     return false;
   }
 
+  function isLinkedInDomain(hostname) {
+    // Check if hostname is linkedin.com or any subdomain
+    return hostname === 'linkedin.com' || hostname.endsWith('.linkedin.com');
+  }
+
+  function replaceProxyDomainInString(str, proxyDomain, targetDomain) {
+    // Replace proxy domain with target domain in a string (handles both encoded and unencoded)
+    const proxyDomainPattern = new RegExp(proxyDomain.replace(/\./g, '\\.'), 'g');
+    return str.replace(proxyDomainPattern, targetDomain);
+  }
+
   function rewriteUrl(url) {
     try {
       const parsed = new URL(url);
@@ -66,8 +77,28 @@
       // Check if URL is for cookiefirst.com - replace proxy domain in path with target domain
       if (isCookiefirstDomain(parsed.hostname)) {
         // Replace proxy domain in the path with target domain
-        const proxyDomainPattern = new RegExp(proxyDomain.replace(/\./g, '\\.'), 'g');
-        parsed.pathname = parsed.pathname.replace(proxyDomainPattern, targetDomain);
+        parsed.pathname = replaceProxyDomainInString(parsed.pathname, proxyDomain, targetDomain);
+        return parsed.toString();
+      }
+
+      // Check if URL is for linkedin.com - replace proxy domain in path and query params with target domain
+      if (isLinkedInDomain(parsed.hostname)) {
+        // Replace proxy domain in the path with target domain
+        parsed.pathname = replaceProxyDomainInString(parsed.pathname, proxyDomain, targetDomain);
+        // Replace proxy domain in query parameters
+        if (parsed.search) {
+          // Work with searchParams to handle URL-encoded values properly
+          parsed.searchParams.forEach((value, key) => {
+            // Decode the value, replace proxy domain, then set it back
+            const decodedValue = decodeURIComponent(value);
+            const newValue = replaceProxyDomainInString(decodedValue, proxyDomain, targetDomain);
+            if (newValue !== decodedValue) {
+              parsed.searchParams.set(key, newValue);
+            }
+          });
+          // Also replace in the raw search string for any edge cases
+          parsed.search = replaceProxyDomainInString(parsed.search, proxyDomain, targetDomain);
+        }
         return parsed.toString();
       }
 
