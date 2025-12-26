@@ -32,6 +32,10 @@ module.exports = {
     'consent-eu.cookiefirst.com',
     'cookiefirst.com', // Match all cookiefirst.com subdomains
     'braze.com', // Match all braze.com subdomains (e.g., sdk.iad-07.braze.com)
-    'api.leonardo.ai'
+    'api.leonardo.ai',
+    'braintreegateway.com', // Match all braintreegateway.com subdomains
+    'braintree-api.com', // Match all braintree-api.com subdomains
+    'payments.braintree-api.com',
+    'api.braintreegateway.com'
   ]
 }; 
