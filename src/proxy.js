@@ -82,8 +82,11 @@ app.options(/.*/, (req, res) => {
 
 function parseSubdomainFromHost(host, rootDomain) {
   if (!host || !rootDomain) return null;
-  const parts = host.split('.');
-  const rootParts = rootDomain.split('.');
+  // Remove port if present (e.g., "app.hostme360.tech:443" -> "app.hostme360.tech")
+  const hostWithoutPort = host.split(':')[0];
+  const rootWithoutPort = rootDomain.split(':')[0];
+  const parts = hostWithoutPort.split('.');
+  const rootParts = rootWithoutPort.split('.');
   if (parts.length > rootParts.length) {
     return parts.slice(0, parts.length - rootParts.length).join('.');
   }
@@ -234,7 +237,7 @@ function proxyResource(targetUrl, req, res) {
     if (proxyRes.statusCode >= 200 && proxyRes.statusCode < 300) {
       console.log(`${COLORS.puppeteer}[SUCCESS] ${req.method} ${targetUrl} -> ${proxyRes.statusCode}${COLORS.reset}`);
     } else {
-      console.log(`${COLors.error}[FAILED] ${req.method} ${targetUrl} -> ${proxyRes.statusCode}${COLORS.reset}`);
+      console.log(`${COLORS.error}[FAILED] ${req.method} ${targetUrl} -> ${proxyRes.statusCode}${COLORS.reset}`);
     }
     proxyRes.pipe(res);
   });
@@ -267,7 +270,8 @@ function isStaticResource(path) {
 app.use(async (req, res) => {
   console.log(`${COLORS.request}[REQUEST] ${req.method} ${req.originalUrl}${COLORS.reset}`);
   const rootDomain = config.proxyDomain;
-  const host = req.hostname || req.headers.host;
+  // Get hostname, removing port if present
+  const host = (req.hostname || req.headers.host || '').split(':')[0];
   const subdomain = parseSubdomainFromHost(host, rootDomain);
   const cleanPath = req.path;
   let targetUrl;
