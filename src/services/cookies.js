@@ -95,30 +95,79 @@ function invalidateCache() {
 }
 
 /**
+ * Normalize cookie data from various formats (browser extension, Puppeteer, etc.)
+ */
+function normalizeCookie(cookieData) {
+  const normalized = {
+    name: cookieData.name,
+    value: cookieData.value,
+    domain: cookieData.domain || null,
+    path: cookieData.path || '/',
+    httpOnly: cookieData.httpOnly || cookieData.httpOnly === true || false,
+    secure: cookieData.secure || cookieData.secure === true || false,
+    sameSite: 'Lax',
+  };
+
+  // Handle expirationDate (browser extension format) vs expires (Puppeteer format)
+  if (cookieData.expirationDate !== undefined) {
+    // Browser extension format: expirationDate is a Unix timestamp in seconds
+    normalized.expires = cookieData.expirationDate ? Math.floor(cookieData.expirationDate) : null;
+  } else if (cookieData.expires !== undefined) {
+    // Puppeteer format: expires is already a Unix timestamp in seconds
+    normalized.expires = cookieData.expires ? Math.floor(cookieData.expires) : null;
+  } else {
+    normalized.expires = null;
+  }
+
+  // Convert sameSite values
+  if (cookieData.sameSite) {
+    const sameSiteLower = cookieData.sameSite.toLowerCase();
+    if (sameSiteLower === 'no_restriction' || sameSiteLower === 'none') {
+      normalized.sameSite = 'None';
+    } else if (sameSiteLower === 'strict') {
+      normalized.sameSite = 'Strict';
+    } else if (sameSiteLower === 'lax' || sameSiteLower === 'unspecified') {
+      normalized.sameSite = 'Lax';
+    } else {
+      normalized.sameSite = 'Lax';
+    }
+  }
+
+  // Handle session cookies (if expirationDate is missing or session is true)
+  if (cookieData.session === true || (cookieData.expirationDate === undefined && cookieData.expires === undefined)) {
+    normalized.expires = null;
+  }
+
+  return normalized;
+}
+
+/**
  * Create or update a cookie
  */
 async function upsertCookie(cookieData, userId) {
+  // Normalize cookie data first
+  const normalized = normalizeCookie(cookieData);
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
     // If updating by ID, use that
     if (cookieData.id) {
-      const expires = cookieData.expires ? new Date(cookieData.expires * 1000) : null;
+      const expires = normalized.expires ? new Date(normalized.expires * 1000) : null;
       await client.query(
         `UPDATE cookies 
          SET name = $1, value = $2, domain = $3, path = $4, expires = $5, httpOnly = $6, secure = $7, sameSite = $8, 
              updated_at = CURRENT_TIMESTAMP, updated_by = $9
          WHERE id = $10`,
         [
-          cookieData.name,
-          cookieData.value,
-          cookieData.domain || null,
-          cookieData.path || '/',
+          normalized.name,
+          normalized.value,
+          normalized.domain,
+          normalized.path,
           expires,
-          cookieData.httpOnly || false,
-          cookieData.secure || false,
-          cookieData.sameSite || 'Lax',
+          normalized.httpOnly,
+          normalized.secure,
+          normalized.sameSite,
           userId,
           cookieData.id,
         ]
@@ -131,10 +180,10 @@ async function upsertCookie(cookieData, userId) {
     // Check if cookie exists (by name and domain)
     const existing = await client.query(
       'SELECT id FROM cookies WHERE name = $1 AND domain = $2',
-      [cookieData.name, cookieData.domain || null]
+      [normalized.name, normalized.domain]
     );
 
-    const expires = cookieData.expires ? new Date(cookieData.expires * 1000) : null;
+    const expires = normalized.expires ? new Date(normalized.expires * 1000) : null;
 
     if (existing.rows.length > 0) {
       // Update existing cookie
@@ -144,12 +193,12 @@ async function upsertCookie(cookieData, userId) {
              updated_at = CURRENT_TIMESTAMP, updated_by = $7
          WHERE id = $8`,
         [
-          cookieData.value,
-          cookieData.path || '/',
+          normalized.value,
+          normalized.path,
           expires,
-          cookieData.httpOnly || false,
-          cookieData.secure || false,
-          cookieData.sameSite || 'Lax',
+          normalized.httpOnly,
+          normalized.secure,
+          normalized.sameSite,
           userId,
           existing.rows[0].id,
         ]
@@ -164,14 +213,14 @@ async function upsertCookie(cookieData, userId) {
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          RETURNING id`,
         [
-          cookieData.name,
-          cookieData.value,
-          cookieData.domain || null,
-          cookieData.path || '/',
+          normalized.name,
+          normalized.value,
+          normalized.domain,
+          normalized.path,
           expires,
-          cookieData.httpOnly || false,
-          cookieData.secure || false,
-          cookieData.sameSite || 'Lax',
+          normalized.httpOnly,
+          normalized.secure,
+          normalized.sameSite,
           userId,
         ]
       );
