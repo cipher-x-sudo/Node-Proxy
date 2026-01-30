@@ -213,6 +213,45 @@ body {
     gap: 10px;
 }
 
+.form-inline {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.form-inline .form-group {
+    margin-bottom: 0;
+}
+
+.form-hint {
+    font-size: 13px;
+    color: #666;
+    margin-top: 8px;
+}
+
+.form-hint code {
+    background: #eee;
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+.badge {
+    display: inline-block;
+    padding: 2px 8px;
+    font-size: 12px;
+    font-weight: 600;
+    background: #3498db;
+    color: white;
+    border-radius: 4px;
+}
+
+.btn-small {
+    padding: 6px 12px;
+    font-size: 12px;
+}
+
 /* Buttons */
 .btn {
     padding: 12px 24px;

@@ -8,10 +8,10 @@ module.exports = {
   proxyEnabled: process.env.PROXY_ENABLED === 'true' || process.env.PROXY_ENABLED === undefined ? true : false, // Set to true to use an HTTP proxy
   userAgent: process.env.USER_AGENT || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
   httpProxy: {
-    host: process.env.HTTP_PROXY_HOST || '86.109.93.239',
-    port: parseInt(process.env.HTTP_PROXY_PORT || '12323', 10),
-    username: process.env.HTTP_PROXY_USERNAME || 'huzaifaphan',
-    password: process.env.HTTP_PROXY_PASSWORD || 'huzaifaphan'
+    host: process.env.HTTP_PROXY_HOST || '161.77.103.115',
+    port: parseInt(process.env.HTTP_PROXY_PORT || '44729', 10),
+    username: process.env.HTTP_PROXY_USERNAME || '7uFsqCYc65O2fmn',
+    password: process.env.HTTP_PROXY_PASSWORD || '3GHBXbTQT7S67Ll'
   },
   // New option to enable/disable rewriting of static elements
   rewriteStatic: false,

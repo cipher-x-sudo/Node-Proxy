@@ -2,19 +2,20 @@ const { pool } = require('../db/connection');
 const fs = require('fs');
 const path = require('path');
 
-let cookiesCache = null;
-let cacheTimestamp = null;
+const cookiesCache = new Map(); // key: accountId (number), value: { cookies, timestamp }
 const CACHE_TTL = 60000; // 1 minute
 
 /**
- * Load cookies from database
+ * Load cookies from database for an account
  */
-async function loadCookiesFromDB() {
+async function loadCookiesFromDB(accountId) {
+  if (accountId == null) return null;
   try {
     const result = await pool.query(
-      'SELECT id, name, value, domain, path, expires, httpOnly, secure, sameSite FROM cookies ORDER BY domain, name'
+      'SELECT id, name, value, domain, path, expires, httpOnly, secure, sameSite FROM cookies WHERE account_id = $1 ORDER BY domain, name',
+      [accountId]
     );
-    
+
     return result.rows.map(row => ({
       id: row.id,
       name: row.name,
@@ -61,37 +62,37 @@ function loadCookiesFromFile() {
 }
 
 /**
- * Get cookies (from database with file fallback)
+ * Get cookies for an account (from database with file fallback when accountId is null and DB fails)
+ * @param {number|null} accountId - Account ID; when null, returns [] (caller should pass default account id)
  */
-async function getCookies() {
-  // Check cache
+async function getCookies(accountId) {
+  if (accountId == null) return [];
+
   const now = Date.now();
-  if (cookiesCache && cacheTimestamp && (now - cacheTimestamp) < CACHE_TTL) {
-    return cookiesCache;
+  const cached = cookiesCache.get(accountId);
+  if (cached && (now - cached.timestamp) < CACHE_TTL) {
+    return cached.cookies;
   }
 
-  // Try database first
-  let cookies = await loadCookiesFromDB();
-  
-  // Fallback to file if database fails or returns empty
-  if (!cookies || cookies.length === 0) {
-    console.warn('Database cookies unavailable or empty, using file cookies');
-    cookies = loadCookiesFromFile();
+  let cookies = await loadCookiesFromDB(accountId);
+  if (cookies === null) {
+    console.warn('Database cookies unavailable for account', accountId);
+    return [];
   }
 
-  // Update cache
-  cookiesCache = cookies;
-  cacheTimestamp = now;
-
+  cookiesCache.set(accountId, { cookies, timestamp: now });
   return cookies;
 }
 
 /**
- * Invalidate cookies cache
+ * Invalidate cookies cache (all accounts or a specific account)
  */
-function invalidateCache() {
-  cookiesCache = null;
-  cacheTimestamp = null;
+function invalidateCache(accountId) {
+  if (accountId != null) {
+    cookiesCache.delete(accountId);
+  } else {
+    cookiesCache.clear();
+  }
 }
 
 /**
@@ -142,23 +143,26 @@ function normalizeCookie(cookieData) {
 }
 
 /**
- * Create or update a cookie
+ * Create or update a cookie (cookieData must include accountId)
  */
 async function upsertCookie(cookieData, userId) {
-  // Normalize cookie data first
+  const accountId = cookieData.accountId;
+  if (accountId == null) {
+    throw new Error('accountId is required for cookie');
+  }
   const normalized = normalizeCookie(cookieData);
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    // If updating by ID, use that
+    const expires = normalized.expires ? new Date(normalized.expires * 1000) : null;
+
     if (cookieData.id) {
-      const expires = normalized.expires ? new Date(normalized.expires * 1000) : null;
       await client.query(
         `UPDATE cookies 
          SET name = $1, value = $2, domain = $3, path = $4, expires = $5, httpOnly = $6, secure = $7, sameSite = $8, 
              updated_at = CURRENT_TIMESTAMP, updated_by = $9
-         WHERE id = $10`,
+         WHERE id = $10 AND account_id = $11`,
         [
           normalized.name,
           normalized.value,
@@ -170,23 +174,20 @@ async function upsertCookie(cookieData, userId) {
           normalized.sameSite,
           userId,
           cookieData.id,
+          accountId,
         ]
       );
       await client.query('COMMIT');
-      invalidateCache();
+      invalidateCache(accountId);
       return { success: true, id: cookieData.id, action: 'updated' };
     }
 
-    // Check if cookie exists (by name and domain)
     const existing = await client.query(
-      'SELECT id FROM cookies WHERE name = $1 AND domain = $2',
-      [normalized.name, normalized.domain]
+      'SELECT id FROM cookies WHERE name = $1 AND domain = $2 AND account_id = $3',
+      [normalized.name, normalized.domain, accountId]
     );
 
-    const expires = normalized.expires ? new Date(normalized.expires * 1000) : null;
-
     if (existing.rows.length > 0) {
-      // Update existing cookie
       await client.query(
         `UPDATE cookies 
          SET value = $1, path = $2, expires = $3, httpOnly = $4, secure = $5, sameSite = $6, 
@@ -204,30 +205,30 @@ async function upsertCookie(cookieData, userId) {
         ]
       );
       await client.query('COMMIT');
-      invalidateCache();
+      invalidateCache(accountId);
       return { success: true, id: existing.rows[0].id, action: 'updated' };
-    } else {
-      // Insert new cookie
-      const result = await client.query(
-        `INSERT INTO cookies (name, value, domain, path, expires, httpOnly, secure, sameSite, updated_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-         RETURNING id`,
-        [
-          normalized.name,
-          normalized.value,
-          normalized.domain,
-          normalized.path,
-          expires,
-          normalized.httpOnly,
-          normalized.secure,
-          normalized.sameSite,
-          userId,
-        ]
-      );
-      await client.query('COMMIT');
-      invalidateCache();
-      return { success: true, id: result.rows[0].id, action: 'created' };
     }
+
+    const result = await client.query(
+      `INSERT INTO cookies (account_id, name, value, domain, path, expires, httpOnly, secure, sameSite, updated_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       RETURNING id`,
+      [
+        accountId,
+        normalized.name,
+        normalized.value,
+        normalized.domain,
+        normalized.path,
+        expires,
+        normalized.httpOnly,
+        normalized.secure,
+        normalized.sameSite,
+        userId,
+      ]
+    );
+    await client.query('COMMIT');
+    invalidateCache(accountId);
+    return { success: true, id: result.rows[0].id, action: 'created' };
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
@@ -237,12 +238,17 @@ async function upsertCookie(cookieData, userId) {
 }
 
 /**
- * Delete a cookie
+ * Delete a cookie by ID (invalidates cache for the cookie's account)
  */
 async function deleteCookie(cookieId) {
   try {
+    const accountResult = await pool.query('SELECT account_id FROM cookies WHERE id = $1', [cookieId]);
     await pool.query('DELETE FROM cookies WHERE id = $1', [cookieId]);
-    invalidateCache();
+    if (accountResult.rows.length > 0 && accountResult.rows[0].account_id) {
+      invalidateCache(accountResult.rows[0].account_id);
+    } else {
+      invalidateCache();
+    }
     return { success: true };
   } catch (error) {
     throw error;
@@ -250,12 +256,17 @@ async function deleteCookie(cookieId) {
 }
 
 /**
- * Delete all cookies
+ * Delete all cookies for an account (or all cookies if accountId not provided, for backward compat)
  */
-async function deleteAllCookies() {
+async function deleteAllCookies(accountId) {
   try {
-    await pool.query('DELETE FROM cookies');
-    invalidateCache();
+    if (accountId != null) {
+      await pool.query('DELETE FROM cookies WHERE account_id = $1', [accountId]);
+      invalidateCache(accountId);
+    } else {
+      await pool.query('DELETE FROM cookies');
+      invalidateCache();
+    }
     return { success: true };
   } catch (error) {
     throw error;
@@ -263,7 +274,7 @@ async function deleteAllCookies() {
 }
 
 /**
- * Migrate cookies from files to database
+ * Migrate cookies from files to database (assigns to default account)
  */
 async function migrateCookies() {
   const fileCookies = loadCookiesFromFile();
@@ -272,23 +283,30 @@ async function migrateCookies() {
     return;
   }
 
+  const defaultAccountResult = await pool.query('SELECT id FROM accounts WHERE is_default = true LIMIT 1');
+  const defaultAccountId = defaultAccountResult.rows[0]?.id;
+  if (!defaultAccountId) {
+    console.warn('No default account found; skipping cookie file migration');
+    return;
+  }
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
     for (const cookie of fileCookies) {
-      // Check if cookie already exists
       const existing = await client.query(
-        'SELECT id FROM cookies WHERE name = $1 AND domain = $2',
-        [cookie.name, cookie.domain || null]
+        'SELECT id FROM cookies WHERE name = $1 AND domain = $2 AND account_id = $3',
+        [cookie.name, cookie.domain || null, defaultAccountId]
       );
 
       if (existing.rows.length === 0) {
         const expires = cookie.expires ? new Date(cookie.expires * 1000) : null;
         await client.query(
-          `INSERT INTO cookies (name, value, domain, path, expires, httpOnly, secure, sameSite)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          `INSERT INTO cookies (account_id, name, value, domain, path, expires, httpOnly, secure, sameSite)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
           [
+            defaultAccountId,
             cookie.name,
             cookie.value,
             cookie.domain || null,
@@ -303,7 +321,7 @@ async function migrateCookies() {
     }
 
     await client.query('COMMIT');
-    invalidateCache();
+    invalidateCache(defaultAccountId);
     console.log(`Migrated ${fileCookies.length} cookies from files to database`);
   } catch (error) {
     await client.query('ROLLBACK');

@@ -11,9 +11,11 @@ const cheerio = require('cheerio');
 const { getConfig } = require('./services/config');
 const { initializeDatabase } = require('./db/connection');
 const { migrateConfig } = require('./db/migrations/migrate-config');
+const { migrateAccounts } = require('./db/migrations/migrate-accounts');
 const { router: authRouter, createDefaultAdmin } = require('./auth/routes');
 const adminRouter = require('./routes/admin');
 const { getCookies, migrateCookies } = require('./services/cookies');
+const { getAccountBySlug, getDefaultAccount } = require('./services/accounts');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -106,6 +108,50 @@ function parseSubdomainFromHost(host, rootDomain) {
   return null;
 }
 
+/**
+ * Resolve account from path prefix /a/<slug>/ or header X-Proxy-Account, else default account.
+ * Returns { accountId, accountSlug, pathPrefix, cleanPath }.
+ */
+async function resolveAccount(req) {
+  const pathPrefix = '/a/';
+  const pathMatch = req.path.match(new RegExp('^' + pathPrefix.replace('/', '\\/') + '([^/]+)(\\/.*)?$'));
+  if (pathMatch) {
+    const slug = pathMatch[1];
+    const pathRest = (pathMatch[2] || '/').replace(/^\/$/, '/');
+    const account = await getAccountBySlug(slug);
+    if (account) {
+      return {
+        accountId: account.id,
+        accountSlug: account.slug,
+        pathPrefix: pathPrefix + account.slug + '/',
+        cleanPath: pathRest,
+      };
+    }
+  }
+  const headerSlug = req.headers['x-proxy-account'];
+  if (headerSlug && typeof headerSlug === 'string') {
+    const account = await getAccountBySlug(headerSlug.trim());
+    if (account) {
+      return {
+        accountId: account.id,
+        accountSlug: account.slug,
+        pathPrefix: '',
+        cleanPath: req.path,
+      };
+    }
+  }
+  const defaultAccount = await getDefaultAccount();
+  if (defaultAccount) {
+    return {
+      accountId: defaultAccount.id,
+      accountSlug: defaultAccount.slug,
+      pathPrefix: '',
+      cleanPath: req.path,
+    };
+  }
+  return { accountId: null, accountSlug: null, pathPrefix: '', cleanPath: req.path };
+}
+
 function injectScripts(html) {
   const configScript = `<script>window.proxyConfig = ${JSON.stringify({
     proxyDomain: config.proxyDomain,
@@ -162,7 +208,8 @@ function isApiRequest(targetUrl) {
   }
 }
 
-async function proxyResource(targetUrl, req, res) {
+async function proxyResource(targetUrl, req, res, accountContext = {}) {
+  const { accountId = null, accountSlug = null } = accountContext;
   console.log(`${COLORS.proxy}[PROXY] Resource: ${req.method} ${req.originalUrl} -> ${targetUrl}${COLORS.reset}`);
   
   // NEW: Special handling for API requests
@@ -206,20 +253,17 @@ async function proxyResource(targetUrl, req, res) {
         }
       });
       
-      // Rewrite redirect Location headers to go through proxy
+      // Rewrite redirect Location headers to go through proxy (preserve account path prefix)
       if (proxyRes.statusCode >= 300 && proxyRes.statusCode < 400 && headers.location) {
         try {
           const redirectUrl = new URL(headers.location, targetUrl);
-          // Check if redirect is to target domain
           if (redirectUrl.hostname === config.targetDomain || redirectUrl.hostname.endsWith('.' + config.targetDomain)) {
             const sub = parseSubdomainFromHost(redirectUrl.hostname, config.targetDomain);
-            // Determine protocol from request or default to https
             const protocol = (req.secure || req.headers['x-forwarded-proto'] === 'https' || req.headers['x-forwarded-ssl'] === 'on') ? 'https' : 'http';
-            // Get base proxy domain (remove port if present, and remove any existing subdomain)
-            const baseProxyDomain = config.proxyDomain.split(':')[0]; // Remove port if present
-            // Build new host with subdomain if present
+            const baseProxyDomain = config.proxyDomain.split(':')[0];
             const newHost = sub ? `${sub}.${baseProxyDomain}` : baseProxyDomain;
-            headers.location = `${protocol}://${newHost}${redirectUrl.pathname}${redirectUrl.search}${redirectUrl.hash}`;
+            const pathWithAccount = accountSlug ? '/a/' + accountSlug + (redirectUrl.pathname === '/' ? '' : redirectUrl.pathname) : redirectUrl.pathname;
+            headers.location = `${protocol}://${newHost}${pathWithAccount}${redirectUrl.search}${redirectUrl.hash}`;
             console.log(`${COLORS.proxy}[PROXY] Rewrote API redirect: ${redirectUrl.toString()} -> ${headers.location}${COLORS.reset}`);
           }
         } catch (err) {
@@ -308,17 +352,17 @@ async function proxyResource(targetUrl, req, res) {
   // Existing proxy logic for non-API requests
   const client = targetUrl.startsWith('https') ? https : http;
   let mergedCookie = '';
-  
+
   let targetHostname = '';
   try {
     targetHostname = new URL(targetUrl).hostname;
   } catch {}
-  
-  const skipCredentials = Array.isArray(config.noCredentialsDomains) && 
+
+  const skipCredentials = Array.isArray(config.noCredentialsDomains) &&
                          config.noCredentialsDomains.includes(targetHostname);
-  
-  if (!skipCredentials) {
-    const cookies = await getCookies();
+
+  if (!skipCredentials && accountId) {
+    const cookies = await getCookies(accountId);
     if (cookies.length) {
       mergedCookie = cookies.map(c => `${c.name}=${c.value}`).join('; ');
     }
@@ -328,26 +372,33 @@ async function proxyResource(targetUrl, req, res) {
       ? mergedCookie + '; ' + req.headers.cookie
       : req.headers.cookie;
   }
-  
+
+  const refererValue = req.headers.referer
+    ? (() => {
+        try {
+          const refUrl = new URL(req.headers.referer);
+          const proxyRoot = config.proxyDomain;
+          const targetRoot = config.targetDomain;
+          const refHost = refUrl.hostname;
+          const sub = parseSubdomainFromHost(refHost, proxyRoot);
+          const newHost = sub ? `${sub}.${targetRoot}` : targetRoot;
+          refUrl.hostname = newHost;
+          if (accountSlug && refUrl.pathname.startsWith('/a/' + accountSlug + '/')) {
+            refUrl.pathname = refUrl.pathname.slice(('/a/' + accountSlug).length) || '/';
+          } else if (accountSlug && refUrl.pathname === '/a/' + accountSlug) {
+            refUrl.pathname = '/';
+          }
+          return refUrl.toString();
+        } catch {
+          return `https://${config.targetDomain}/`;
+        }
+      })()
+    : `https://${config.targetDomain}/`;
+
   const outgoingHeaders = {
     ...req.headers,
     'user-agent': req.headers['user-agent'] || config.userAgent,
-    referer: req.headers.referer
-      ? (() => {
-          try {
-            const refUrl = new URL(req.headers.referer);
-            const proxyRoot = config.proxyDomain;
-            const targetRoot = config.targetDomain;
-            const refHost = refUrl.hostname;
-            const sub = parseSubdomainFromHost(refHost, proxyRoot);
-            const newHost = sub ? `${sub}.${targetRoot}` : targetRoot;
-            refUrl.hostname = newHost;
-            return refUrl.toString();
-          } catch {
-            return `https://${config.targetDomain}/`;
-          }
-        })()
-      : `https://${config.targetDomain}/`,
+    referer: refererValue,
     origin: req.headers.origin || `https://${config.proxyDomain}`,
     ...(skipCredentials ? {} : { cookie: mergedCookie }),
   };
@@ -363,27 +414,24 @@ async function proxyResource(targetUrl, req, res) {
   const proxyReq = client.request(targetUrl, requestOptions, proxyRes => {
     const headers = { ...proxyRes.headers };
     
-    // Rewrite redirect Location headers to go through proxy
+    // Rewrite redirect Location headers to go through proxy (preserve account path prefix)
     if (proxyRes.statusCode >= 300 && proxyRes.statusCode < 400 && headers.location) {
       try {
         const redirectUrl = new URL(headers.location, targetUrl);
-        // Check if redirect is to target domain
         if (redirectUrl.hostname === config.targetDomain || redirectUrl.hostname.endsWith('.' + config.targetDomain)) {
           const sub = parseSubdomainFromHost(redirectUrl.hostname, config.targetDomain);
-          // Determine protocol from request or default to https
           const protocol = (req.secure || req.headers['x-forwarded-proto'] === 'https' || req.headers['x-forwarded-ssl'] === 'on') ? 'https' : 'http';
-          // Get base proxy domain (remove port if present, and remove any existing subdomain)
-          const baseProxyDomain = config.proxyDomain.split(':')[0]; // Remove port if present
-          // Build new host with subdomain if present
+          const baseProxyDomain = config.proxyDomain.split(':')[0];
           const newHost = sub ? `${sub}.${baseProxyDomain}` : baseProxyDomain;
-          headers.location = `${protocol}://${newHost}${redirectUrl.pathname}${redirectUrl.search}${redirectUrl.hash}`;
+          const pathWithAccount = accountSlug ? '/a/' + accountSlug + (redirectUrl.pathname === '/' ? '' : redirectUrl.pathname) : redirectUrl.pathname;
+          headers.location = `${protocol}://${newHost}${pathWithAccount}${redirectUrl.search}${redirectUrl.hash}`;
           console.log(`${COLORS.proxy}[PROXY] Rewrote redirect: ${redirectUrl.toString()} -> ${headers.location}${COLORS.reset}`);
         }
       } catch (err) {
         console.log(`${COLORS.error}[ERROR] Failed to rewrite redirect location: ${err.message}${COLORS.reset}`);
       }
     }
-    
+
     // Always set CORS headers if origin is present
     if (req.headers.origin) {
       headers['access-control-allow-origin'] = req.headers.origin;
@@ -441,27 +489,28 @@ function isStaticResource(path) {
 
 app.use(async (req, res) => {
   console.log(`${COLORS.request}[REQUEST] ${req.method} ${req.originalUrl}${COLORS.reset}`);
+  const resolved = await resolveAccount(req);
+  const { accountId, accountSlug, cleanPath } = resolved;
+  const accountContext = { accountId, accountSlug };
+
   const rootDomain = config.proxyDomain;
-  // Get hostname, removing port if present
   const host = (req.hostname || req.headers.host || '').split(':')[0];
   const subdomain = parseSubdomainFromHost(host, rootDomain);
-  const cleanPath = req.path;
+  const queryPart = req.url.includes('?') ? '?' + req.url.split('?')[1] : '';
   let targetUrl;
-  
   if (subdomain) {
-    targetUrl = `https://${subdomain}.${config.targetDomain}${cleanPath}${req.url.includes('?') ? '?' + req.url.split('?')[1] : ''}`;
+    targetUrl = `https://${subdomain}.${config.targetDomain}${cleanPath}${queryPart}`;
     console.log(`${COLORS.proxy}[PROXY] Subdomain: ${subdomain} | CleanPath: ${cleanPath} | Target: ${targetUrl}${COLORS.reset}`);
   } else {
-    targetUrl = `https://${config.targetDomain}${cleanPath}${req.url.includes('?') ? '?' + req.url.split('?')[1] : ''}`;
+    targetUrl = `https://${config.targetDomain}${cleanPath}${queryPart}`;
     console.log(`${COLORS.proxy}[PROXY] No subdomain | CleanPath: ${cleanPath} | Target: ${targetUrl}${COLORS.reset}`);
   }
 
   const staticResource = isStaticResource(cleanPath);
   const accept = req.headers.accept || '';
 
-  // NEW: Handle API requests immediately
   if (isApiRequest(targetUrl)) {
-    await proxyResource(targetUrl, req, res);
+    await proxyResource(targetUrl, req, res, accountContext);
     return;
   }
 
@@ -469,17 +518,19 @@ app.use(async (req, res) => {
     const browser = await browserPromise;
     const page = await browser.newPage();
     await page.setUserAgent(config.userAgent);
-    
-    const cookies = await getCookies();
-    if (cookies.length) {
-      try {
-        await page.setCookie(...cookies);
-        console.log(COLORS.puppeteer + '[PUPPETEER] Cookies set for page' + COLORS.reset);
-      } catch (e) {
-        console.log(COLORS.error + '[ERROR] Failed to set cookies for page: ' + e.message + COLORS.reset);
+
+    if (accountId) {
+      const cookies = await getCookies(accountId);
+      if (cookies.length) {
+        try {
+          await page.setCookie(...cookies);
+          console.log(COLORS.puppeteer + '[PUPPETEER] Cookies set for page' + COLORS.reset);
+        } catch (e) {
+          console.log(COLORS.error + '[ERROR] Failed to set cookies for page: ' + e.message + COLORS.reset);
+        }
       }
     }
-    
+
     console.log(`${COLORS.navigation}[PUPPETEER] Navigating to ${targetUrl}${COLORS.reset}`);
 
     if (config.proxyEnabled && config.httpProxy.username && config.httpProxy.password) {
@@ -523,7 +574,7 @@ app.use(async (req, res) => {
     res.status(200).send(body);
     await page.close();
   } else {
-    await proxyResource(targetUrl, req, res);
+    await proxyResource(targetUrl, req, res, accountContext);
     return;
   }
 });
@@ -546,6 +597,13 @@ if (require.main === module) {
       } catch (error) {
         console.warn('Config migration skipped (may already be migrated):', error.message);
       }
+
+      // Migrate to multi-account support (accounts table, account_id on cookies, default account)
+      try {
+        await migrateAccounts();
+      } catch (error) {
+        console.warn('Accounts migration skipped (may already be migrated):', error.message);
+      }
       
       // Reload config from database (will merge with env vars)
       const dbConfig = await getConfig();
@@ -554,9 +612,10 @@ if (require.main === module) {
         console.log('Configuration loaded from database');
       }
       
-      // Load cookies from database (for initial count)
-      const initialCookies = await getCookies();
-      console.log(`\x1b[33m[COOKIES] Loaded ${initialCookies.length} cookie(s) from database\x1b[0m`);
+      // Load cookies from database (for initial count, default account)
+      const defaultAccount = await getDefaultAccount();
+      const initialCookies = defaultAccount ? await getCookies(defaultAccount.id) : [];
+      console.log(`\x1b[33m[COOKIES] Loaded ${initialCookies.length} cookie(s) for default account from database\x1b[0m`);
       
       const shutdown = async () => {
         console.log('\nShutting down gracefully...');

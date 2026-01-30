@@ -14,6 +14,7 @@
             </div>
             <ul class="nav-menu">
                 <li><a href="#" data-view="dashboard" class="nav-link active">Dashboard</a></li>
+                <li><a href="#" data-view="accounts" class="nav-link">Accounts</a></li>
                 <li><a href="#" data-view="config" class="nav-link">Configuration</a></li>
                 <li><a href="#" data-view="cookies" class="nav-link">Cookies</a></li>
                 <li><a href="#" data-view="history" class="nav-link">History</a></li>
@@ -48,6 +49,46 @@
                             <h3>History Entries</h3>
                             <p class="stat-value" id="stat-history">-</p>
                         </div>
+                        <div class="stat-card">
+                            <h3>Accounts</h3>
+                            <p class="stat-value" id="stat-accounts">-</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Accounts View -->
+                <div id="accounts-view" class="view">
+                    <div class="accounts-section">
+                        <h3>Create New Account</h3>
+                        <div class="form-inline">
+                            <div class="form-group">
+                                <label>Name</label>
+                                <input type="text" id="account-name" class="config-input" placeholder="e.g. Alice">
+                            </div>
+                            <div class="form-group">
+                                <label>Slug (URL-safe)</label>
+                                <input type="text" id="account-slug" class="config-input" placeholder="e.g. alice">
+                            </div>
+                            <button id="createAccountBtn" class="btn btn-primary">Create Account</button>
+                        </div>
+                        <p class="form-hint">Use path <code>/a/&lt;slug&gt;/</code> or header <code>X-Proxy-Account: &lt;slug&gt;</code> to use an account's cookies.</p>
+                    </div>
+                    <div class="accounts-list">
+                        <h3>Accounts</h3>
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Name</th>
+                                    <th>Slug</th>
+                                    <th>Default</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="accountsTableBody">
+                                <tr><td colspan="5">Loading...</td></tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
 
@@ -157,6 +198,10 @@
                         <div class="section-header">
                             <h3>Cookie Management</h3>
                             <div class="header-actions">
+                                <label>Account:</label>
+                                <select id="cookieAccountSelect" class="config-input" style="min-width: 160px; margin-right: 8px;">
+                                    <option value="">Loading...</option>
+                                </select>
                                 <button id="addCookieBtn" class="btn btn-primary">Add Cookie</button>
                                 <button id="importCookiesBtn" class="btn btn-secondary">Import JSON</button>
                                 <button id="deleteAllCookiesBtn" class="btn btn-danger">Delete All</button>

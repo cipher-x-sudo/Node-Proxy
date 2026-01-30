@@ -4,6 +4,15 @@ const { pool } = require('../db/connection');
 const { requireAuth } = require('../auth/middleware');
 const { getConfig, updateConfig, getConfigHistory, invalidateCache: invalidateConfigCache } = require('../services/config');
 const { getCookies, upsertCookie, deleteCookie, deleteAllCookies, invalidateCache: invalidateCookieCache } = require('../services/cookies');
+const {
+  listAccounts,
+  getAccountById,
+  createAccount,
+  updateAccount,
+  setDefaultAccount,
+  deleteAccount,
+  getDefaultAccount,
+} = require('../services/accounts');
 
 const router = express.Router();
 
@@ -90,21 +99,113 @@ router.get('/config/history', async (req, res) => {
  */
 router.get('/stats', async (req, res) => {
   try {
-    // Get basic stats
     const configCount = await pool.query('SELECT COUNT(*) FROM config');
     const userCount = await pool.query('SELECT COUNT(*) FROM users');
     const historyCount = await pool.query('SELECT COUNT(*) FROM config_history');
+    const accountCount = await pool.query('SELECT COUNT(*) FROM accounts');
 
     res.json({
       stats: {
         configEntries: parseInt(configCount.rows[0].count),
         users: parseInt(userCount.rows[0].count),
         historyEntries: parseInt(historyCount.rows[0].count),
+        accounts: parseInt(accountCount.rows[0].count),
       },
     });
   } catch (error) {
     console.error('Get stats error:', error);
     res.status(500).json({ error: 'Failed to load statistics' });
+  }
+});
+
+/**
+ * List all accounts
+ */
+router.get('/accounts', async (req, res) => {
+  try {
+    const accounts = await listAccounts();
+    res.json({ accounts });
+  } catch (error) {
+    console.error('List accounts error:', error);
+    res.status(500).json({ error: 'Failed to load accounts' });
+  }
+});
+
+/**
+ * Create a new account
+ */
+router.post('/accounts', async (req, res) => {
+  try {
+    const { name, slug } = req.body;
+    if (!name || !slug) {
+      return res.status(400).json({ error: 'Name and slug are required' });
+    }
+    const slugClean = String(slug).trim().toLowerCase().replace(/[^a-z0-9-_]/g, '-');
+    if (!slugClean) {
+      return res.status(400).json({ error: 'Slug must be URL-safe' });
+    }
+    const account = await createAccount(name, slugClean);
+    res.json({ success: true, account });
+  } catch (error) {
+    if (error.code === 'DUPLICATE_SLUG') {
+      return res.status(400).json({ error: error.message });
+    }
+    console.error('Create account error:', error);
+    res.status(500).json({ error: 'Failed to create account' });
+  }
+});
+
+/**
+ * Update an account
+ */
+router.put('/accounts/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid account ID' });
+    const { name, slug } = req.body;
+    const slugClean = slug != null ? String(slug).trim().toLowerCase().replace(/[^a-z0-9-_]/g, '-') : null;
+    const account = await updateAccount(id, name, slugClean);
+    if (!account) return res.status(404).json({ error: 'Account not found' });
+    res.json({ success: true, account });
+  } catch (error) {
+    if (error.code === 'DUPLICATE_SLUG') {
+      return res.status(400).json({ error: error.message });
+    }
+    console.error('Update account error:', error);
+    res.status(500).json({ error: 'Failed to update account' });
+  }
+});
+
+/**
+ * Set account as default
+ */
+router.patch('/accounts/:id/default', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid account ID' });
+    const account = await setDefaultAccount(id);
+    if (!account) return res.status(404).json({ error: 'Account not found' });
+    res.json({ success: true, account });
+  } catch (error) {
+    console.error('Set default account error:', error);
+    res.status(500).json({ error: 'Failed to set default account' });
+  }
+});
+
+/**
+ * Delete an account
+ */
+router.delete('/accounts/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid account ID' });
+    const deleted = await deleteAccount(id);
+    if (!deleted) return res.status(404).json({ error: 'Account not found' });
+    invalidateCookieCache();
+    res.json({ success: true, message: 'Account deleted' });
+  } catch (error) {
+    console.error('Delete account error:', error);
+    res.status(500).json({ error: 'Failed to delete account' });
   }
 });
 
@@ -175,11 +276,16 @@ router.post('/config/reload', async (req, res) => {
 });
 
 /**
- * Get all cookies
+ * Get cookies for an account (query: accountId; if omitted, use default account)
  */
 router.get('/cookies', async (req, res) => {
   try {
-    const cookies = await getCookies();
+    let accountId = req.query.accountId != null ? parseInt(req.query.accountId, 10) : null;
+    if (accountId == null || isNaN(accountId)) {
+      const defaultAccount = await getDefaultAccount();
+      accountId = defaultAccount ? defaultAccount.id : null;
+    }
+    const cookies = accountId ? await getCookies(accountId) : [];
     res.json({ cookies });
   } catch (error) {
     console.error('Get cookies error:', error);
@@ -188,18 +294,19 @@ router.get('/cookies', async (req, res) => {
 });
 
 /**
- * Create or update a cookie
+ * Create or update a cookie (body must include accountId)
  */
 router.post('/cookies', async (req, res) => {
   try {
     const cookieData = req.body;
-    
     if (!cookieData.name || !cookieData.value) {
       return res.status(400).json({ error: 'Cookie name and value are required' });
     }
-
+    if (cookieData.accountId == null) {
+      return res.status(400).json({ error: 'accountId is required' });
+    }
     const result = await upsertCookie(cookieData, req.user.userId);
-    invalidateCookieCache(); // Invalidate cache after update
+    invalidateCookieCache(cookieData.accountId);
     res.json({ success: true, ...result });
   } catch (error) {
     console.error('Upsert cookie error:', error);
@@ -208,21 +315,19 @@ router.post('/cookies', async (req, res) => {
 });
 
 /**
- * Update a cookie by ID
+ * Update a cookie by ID (body may include accountId for the cookie's account)
  */
 router.put('/cookies/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const cookieData = req.body;
-
-    // First check if cookie exists
-    const existing = await pool.query('SELECT id FROM cookies WHERE id = $1', [id]);
+    const existing = await pool.query('SELECT id, account_id FROM cookies WHERE id = $1', [id]);
     if (existing.rows.length === 0) {
       return res.status(404).json({ error: 'Cookie not found' });
     }
-
-    const result = await upsertCookie({ ...cookieData, id }, req.user.userId);
-    invalidateCookieCache(); // Invalidate cache after update
+    const accountId = cookieData.accountId != null ? cookieData.accountId : existing.rows[0].account_id;
+    const result = await upsertCookie({ ...cookieData, id, accountId }, req.user.userId);
+    invalidateCookieCache(accountId);
     res.json({ success: true, ...result });
   } catch (error) {
     console.error('Update cookie error:', error);
@@ -237,7 +342,6 @@ router.delete('/cookies/:id', async (req, res) => {
   try {
     const { id } = req.params;
     await deleteCookie(id);
-    invalidateCookieCache(); // Invalidate cache after delete
     res.json({ success: true, message: 'Cookie deleted' });
   } catch (error) {
     console.error('Delete cookie error:', error);
@@ -246,13 +350,14 @@ router.delete('/cookies/:id', async (req, res) => {
 });
 
 /**
- * Delete all cookies
+ * Delete all cookies (query: accountId optional; if provided, delete only that account's cookies)
  */
 router.delete('/cookies', async (req, res) => {
   try {
-    await deleteAllCookies();
-    invalidateCookieCache(); // Invalidate cache after delete all
-    res.json({ success: true, message: 'All cookies deleted' });
+    const accountId = req.query.accountId != null ? parseInt(req.query.accountId, 10) : null;
+    await deleteAllCookies(isNaN(accountId) ? null : accountId);
+    invalidateCookieCache(accountId);
+    res.json({ success: true, message: accountId ? 'Account cookies deleted' : 'All cookies deleted' });
   } catch (error) {
     console.error('Delete all cookies error:', error);
     res.status(500).json({ error: 'Failed to delete cookies' });
@@ -260,27 +365,27 @@ router.delete('/cookies', async (req, res) => {
 });
 
 /**
- * Bulk import cookies
+ * Bulk import cookies (body: cookies array, accountId required)
  */
 router.post('/cookies/bulk', async (req, res) => {
   try {
-    const { cookies } = req.body;
-
+    const { cookies, accountId } = req.body;
     if (!Array.isArray(cookies)) {
       return res.status(400).json({ error: 'Cookies must be an array' });
     }
-
+    if (accountId == null) {
+      return res.status(400).json({ error: 'accountId is required' });
+    }
     const results = [];
     for (const cookie of cookies) {
       try {
-        const result = await upsertCookie(cookie, req.user.userId);
+        const result = await upsertCookie({ ...cookie, accountId }, req.user.userId);
         results.push({ cookie: cookie.name, ...result });
       } catch (error) {
         results.push({ cookie: cookie.name, success: false, error: error.message });
       }
     }
-
-    invalidateCookieCache(); // Invalidate cache after bulk import
+    invalidateCookieCache(accountId);
     res.json({ success: true, results });
   } catch (error) {
     console.error('Bulk import cookies error:', error);

@@ -30,9 +30,20 @@ CREATE TABLE IF NOT EXISTS config_history (
     changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Accounts table for multi-account cookie support
+CREATE TABLE IF NOT EXISTS accounts (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    slug VARCHAR(255) UNIQUE NOT NULL,
+    is_default BOOLEAN DEFAULT false,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Cookies table for storing cookies used by Puppeteer
 CREATE TABLE IF NOT EXISTS cookies (
     id SERIAL PRIMARY KEY,
+    account_id INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     value TEXT NOT NULL,
     domain VARCHAR(255),
@@ -52,4 +63,6 @@ CREATE INDEX IF NOT EXISTS idx_config_history_config_id ON config_history(config
 CREATE INDEX IF NOT EXISTS idx_config_history_changed_at ON config_history(changed_at);
 CREATE INDEX IF NOT EXISTS idx_cookies_domain ON cookies(domain);
 CREATE INDEX IF NOT EXISTS idx_cookies_name ON cookies(name);
+CREATE INDEX IF NOT EXISTS idx_cookies_account_id ON cookies(account_id);
+CREATE INDEX IF NOT EXISTS idx_accounts_slug ON accounts(slug);
 

@@ -70,19 +70,23 @@ function showView(viewName) {
     // Update title
     const titles = {
         dashboard: 'Dashboard',
+        accounts: 'Accounts',
         config: 'Configuration',
         cookies: 'Cookies',
         history: 'History',
         users: 'Users',
     };
-    document.getElementById('pageTitle').textContent = titles[viewName];
+    document.getElementById('pageTitle').textContent = titles[viewName] || viewName;
 
     // Load view data
     if (viewName === 'dashboard') {
         loadDashboard();
+    } else if (viewName === 'accounts') {
+        loadAccounts();
     } else if (viewName === 'config') {
         loadConfig();
     } else if (viewName === 'cookies') {
+        loadCookieAccountSelector();
         loadCookies();
     } else if (viewName === 'history') {
         loadHistory();
@@ -108,8 +112,95 @@ async function loadDashboard() {
         document.getElementById('stat-config').textContent = data.stats.configEntries;
         document.getElementById('stat-users').textContent = data.stats.users;
         document.getElementById('stat-history').textContent = data.stats.historyEntries;
+        document.getElementById('stat-accounts').textContent = data.stats.accounts != null ? data.stats.accounts : '-';
     }
 }
+
+// Accounts
+let accountsList = [];
+
+async function loadAccounts() {
+    const response = await apiRequest('/accounts');
+    if (response) {
+        const data = await response.json();
+        accountsList = data.accounts || [];
+        const tbody = document.getElementById('accountsTableBody');
+        if (accountsList.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5">No accounts yet. Create one above.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = accountsList.map(acc => `
+            <tr>
+                <td>${acc.id}</td>
+                <td>${acc.name}</td>
+                <td><code>${acc.slug}</code></td>
+                <td>${acc.is_default ? '<span class="badge">Default</span>' : ''}</td>
+                <td>
+                    ${!acc.is_default ? `<button class="btn-secondary btn-small" onclick="setDefaultAccount(${acc.id})">Set default</button> ` : ''}
+                    <button class="btn-delete btn-small" onclick="deleteAccountById(${acc.id}, ${JSON.stringify(acc.name).replace(/"/g, '&quot;')})">Delete</button>
+                </td>
+            </tr>
+        `).join('');
+    }
+}
+
+window.setDefaultAccount = async (id) => {
+    const response = await apiRequest(`/accounts/${id}/default`, { method: 'PATCH' });
+    if (response) {
+        const data = await response.json();
+        if (data.success) {
+            showNotification('Default account updated!');
+            loadAccounts();
+            if (document.getElementById('cookieAccountSelect').parentElement.offsetParent !== null) {
+                loadCookieAccountSelector();
+            }
+        } else {
+            showNotification(data.error || 'Failed to set default', true);
+        }
+    }
+};
+
+window.deleteAccountById = async (id, name) => {
+    if (!confirm(`Delete account "${name}"? All cookies for this account will be deleted.`)) return;
+    const response = await apiRequest(`/accounts/${id}`, { method: 'DELETE' });
+    if (response) {
+        const data = await response.json();
+        if (data.success) {
+            showNotification('Account deleted.');
+            loadAccounts();
+            loadCookieAccountSelector();
+            loadCookies();
+        } else {
+            showNotification(data.error || 'Failed to delete account', true);
+        }
+    }
+};
+
+document.getElementById('createAccountBtn').addEventListener('click', async () => {
+    const name = document.getElementById('account-name').value.trim();
+    let slug = document.getElementById('account-slug').value.trim().toLowerCase().replace(/[^a-z0-9-_]/g, '-');
+    if (!name) {
+        showNotification('Name is required', true);
+        return;
+    }
+    if (!slug) slug = name.toLowerCase().replace(/[^a-z0-9-_]/g, '-');
+    const response = await apiRequest('/accounts', {
+        method: 'POST',
+        body: JSON.stringify({ name, slug }),
+    });
+    if (response) {
+        const data = await response.json();
+        if (data.success) {
+            showNotification('Account created!');
+            document.getElementById('account-name').value = '';
+            document.getElementById('account-slug').value = '';
+            loadAccounts();
+            loadCookieAccountSelector();
+        } else {
+            showNotification(data.error || 'Failed to create account', true);
+        }
+    }
+});
 
 // Configuration
 async function loadConfig() {
@@ -259,25 +350,53 @@ document.getElementById('createUserBtn').addEventListener('click', async () => {
 
 // Cookies
 let editingCookieId = null;
+let selectedCookieAccountId = null;
+
+async function loadCookieAccountSelector() {
+    const response = await apiRequest('/accounts');
+    if (!response) return;
+    const data = await response.json();
+    const accounts = data.accounts || [];
+    const select = document.getElementById('cookieAccountSelect');
+    if (accounts.length === 0) {
+        select.innerHTML = '<option value="">No accounts</option>';
+        select.disabled = true;
+        selectedCookieAccountId = null;
+        return;
+    }
+    select.disabled = false;
+    const defaultAccount = accounts.find(a => a.is_default) || accounts[0];
+    select.innerHTML = accounts.map(a => `
+        <option value="${a.id}" ${a.is_default ? 'selected' : ''}>${a.name} (${a.slug})</option>
+    `).join('');
+    selectedCookieAccountId = parseInt(select.value, 10);
+}
+
+function getSelectedCookieAccountId() {
+    const select = document.getElementById('cookieAccountSelect');
+    const v = select && select.value;
+    return v ? parseInt(v, 10) : null;
+}
 
 async function loadCookies() {
-    const response = await apiRequest('/cookies');
+    const accountId = getSelectedCookieAccountId();
+    const url = accountId ? `/cookies?accountId=${accountId}` : '/cookies';
+    const response = await apiRequest(url);
     if (response) {
         const data = await response.json();
         const tbody = document.getElementById('cookiesTableBody');
-        
-        if (data.cookies.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="9">No cookies found</td></tr>';
+        const cookies = data.cookies || [];
+        if (cookies.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="9">No cookies for this account</td></tr>';
             return;
         }
-
-        tbody.innerHTML = data.cookies.map(cookie => {
+        tbody.innerHTML = cookies.map(cookie => {
             const expires = cookie.expires ? new Date(cookie.expires * 1000).toLocaleString() : 'Session';
             const valueDisplay = cookie.value.length > 50 ? cookie.value.substring(0, 50) + '...' : cookie.value;
             return `
                 <tr>
                     <td>${cookie.name}</td>
-                    <td><code title="${cookie.value}">${valueDisplay}</code></td>
+                    <td><code title="${cookie.value.replace(/"/g, '&quot;')}">${valueDisplay.replace(/</g, '&lt;')}</code></td>
                     <td>${cookie.domain || '-'}</td>
                     <td>${cookie.path || '/'}</td>
                     <td>${expires}</td>
@@ -349,7 +468,13 @@ document.getElementById('cancelCookieBtn').addEventListener('click', () => {
 
 // Save cookie
 document.getElementById('saveCookieBtn').addEventListener('click', async () => {
+    const accountId = getSelectedCookieAccountId();
+    if (!accountId) {
+        showNotification('Select an account first', true);
+        return;
+    }
     const cookieData = {
+        accountId,
         name: document.getElementById('cookie-name').value,
         value: document.getElementById('cookie-value').value,
         domain: document.getElementById('cookie-domain').value || null,
@@ -368,6 +493,7 @@ document.getElementById('saveCookieBtn').addEventListener('click', async () => {
     const cookieId = document.getElementById('cookie-id').value;
     const url = cookieId ? `/cookies/${cookieId}` : '/cookies';
     const method = cookieId ? 'PUT' : 'POST';
+    if (cookieId) cookieData.id = parseInt(cookieId, 10);
 
     const response = await apiRequest(url, {
         method: method,
@@ -388,31 +514,32 @@ document.getElementById('saveCookieBtn').addEventListener('click', async () => {
 
 // Import cookies from JSON
 document.getElementById('importCookiesBtn').addEventListener('click', () => {
+    const accountId = getSelectedCookieAccountId();
+    if (!accountId) {
+        showNotification('Select an account first', true);
+        return;
+    }
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = '.json';
     input.onchange = async (e) => {
         const file = e.target.files[0];
         if (!file) return;
-
         try {
             const text = await file.text();
             const cookies = JSON.parse(text);
-            
             if (!Array.isArray(cookies)) {
                 showNotification('Invalid JSON format. Expected an array of cookies.', true);
                 return;
             }
-
             const response = await apiRequest('/cookies/bulk', {
                 method: 'POST',
-                body: JSON.stringify({ cookies }),
+                body: JSON.stringify({ cookies, accountId }),
             });
-
             if (response) {
                 const data = await response.json();
                 if (data.success) {
-                    const successCount = data.results.filter(r => r.success).length;
+                    const successCount = data.results.filter(r => r.success !== false).length;
                     showNotification(`Imported ${successCount} cookie(s) successfully!`);
                     loadCookies();
                 } else {
@@ -426,15 +553,19 @@ document.getElementById('importCookiesBtn').addEventListener('click', () => {
     input.click();
 });
 
-// Delete all cookies
+// Delete all cookies (for selected account)
 document.getElementById('deleteAllCookiesBtn').addEventListener('click', async () => {
-    if (!confirm('Are you sure you want to delete ALL cookies? This cannot be undone.')) return;
-
-    const response = await apiRequest('/cookies', { method: 'DELETE' });
+    const accountId = getSelectedCookieAccountId();
+    if (!accountId) {
+        showNotification('Select an account first', true);
+        return;
+    }
+    if (!confirm('Delete all cookies for this account? This cannot be undone.')) return;
+    const response = await apiRequest(`/cookies?accountId=${accountId}`, { method: 'DELETE' });
     if (response) {
         const data = await response.json();
         if (data.success) {
-            showNotification('All cookies deleted successfully!');
+            showNotification('Cookies deleted successfully!');
             loadCookies();
         } else {
             showNotification(data.error || 'Failed to delete cookies', true);
@@ -447,6 +578,11 @@ document.getElementById('logoutBtn').addEventListener('click', async () => {
     await apiRequest('/auth/logout', { method: 'POST' });
     localStorage.removeItem('adminToken');
     window.location.href = '/admin/login';
+});
+
+// Cookie account selector change (bind once)
+document.getElementById('cookieAccountSelect')?.addEventListener('change', () => {
+    loadCookies();
 });
 
 // Initialize
