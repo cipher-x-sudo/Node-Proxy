@@ -565,19 +565,10 @@ app.use(async (req, res) => {
 
     let navigationError = null;
     try {
-      await page.goto(targetUrl, { waitUntil: 'networkidle2', timeout: 60000 });
+      await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
     } catch (err) {
       navigationError = err;
       console.log(`${COLORS.error}[ERROR] Puppeteer navigation error for ${targetUrl}: ${err.message}${COLORS.reset}`);
-      // Fallback: try domcontentloaded (faster, often enough for proxy rewrite)
-      if (err.message && err.message.includes('timeout')) {
-        try {
-          await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
-          navigationError = null;
-        } catch (fallbackErr) {
-          console.log(`${COLORS.error}[ERROR] Puppeteer fallback navigation failed: ${fallbackErr.message}${COLORS.reset}`);
-        }
-      }
     }
 
     if (navigationError) {
