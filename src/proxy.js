@@ -565,20 +565,33 @@ app.use(async (req, res) => {
 
     let navigationError = null;
     try {
-      await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+      await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
     } catch (err) {
       navigationError = err;
       console.log(`${COLORS.error}[ERROR] Puppeteer navigation error for ${targetUrl}: ${err.message}${COLORS.reset}`);
     }
 
+    let body;
     if (navigationError) {
-      res.status(502).send('Failed to load resource: ' + navigationError.message);
-      await page.close();
-      return;
+      // On timeout/error, try to serve whatever content we have (page may have partial HTML)
+      try {
+        body = await page.content();
+      } catch (e) {
+        body = '';
+      }
+      if (body && body.length > 500 && body.includes('</body>')) {
+        console.log(`${COLORS.puppeteer}[PUPPETEER] Served partial content after ${navigationError.message}${COLORS.reset}`);
+        navigationError = null;
+      } else {
+        res.status(502).send('Failed to load resource: ' + navigationError.message);
+        await page.close();
+        return;
+      }
     }
 
-    const contentType = await page.evaluate(() => document.contentType);
-    let body = await page.content();
+    if (!body) {
+      body = await page.content();
+    }
     body = injectScripts(body);
     
     res.set('Content-Type', 'text/html');
