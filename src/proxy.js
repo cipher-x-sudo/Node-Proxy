@@ -16,6 +16,7 @@ const { router: authRouter, createDefaultAdmin } = require('./auth/routes');
 const adminRouter = require('./routes/admin');
 const { getCookies, migrateCookies } = require('./services/cookies');
 const { getAccountBySlug, getDefaultAccount } = require('./services/accounts');
+const rewriting = require('./rewriting/server');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -59,8 +60,9 @@ app.use(cookieParser());
 const bodyParser = express.json({ limit: '50mb' });
 const urlEncodedParser = express.urlencoded({ extended: true, limit: '50mb' });
 
-// Serve static assets
+// Serve static assets (rewriting client scripts live under rewriting/client/)
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
+app.use('/assets/rewriting', express.static(path.join(__dirname, 'rewriting', 'client')));
 app.use('/admin/assets', express.static(path.join(__dirname, 'admin/assets')));
 
 // Admin routes (with body parsing)
@@ -98,19 +100,6 @@ app.options(/.*/, (req, res) => {
 
   res.status(204).end();
 });
-
-function parseSubdomainFromHost(host, rootDomain) {
-  if (!host || !rootDomain) return null;
-  // Remove port if present (e.g., "app.hostme360.tech:443" -> "app.hostme360.tech")
-  const hostWithoutPort = host.split(':')[0];
-  const rootWithoutPort = rootDomain.split(':')[0];
-  const parts = hostWithoutPort.split('.');
-  const rootParts = rootWithoutPort.split('.');
-  if (parts.length > rootParts.length) {
-    return parts.slice(0, parts.length - rootParts.length).join('.');
-  }
-  return null;
-}
 
 /**
  * Resolve account from path prefix /a/<slug>/ or header X-Proxy-Account, else default account.
@@ -162,16 +151,19 @@ function injectScripts(html) {
     targetDomain: config.targetDomain,
     tags: config.tagsToOverride,
     attributes: config.attributesToOverride,
+    tagsToOverride: config.tagsToOverride,
+    attributesToOverride: config.attributesToOverride,
     skipRewriteDomains: config.skipRewriteDomains,
-    noCredentialsDomains: config.noCredentialsDomains
+    noCredentialsDomains: config.noCredentialsDomains,
+    noRewriteDomains: config.noRewriteDomains || [],
+    cookiefirstDomains: config.cookiefirstDomains || [],
+    linkedinDomain: config.linkedinDomain || 'linkedin.com',
+    additionalDomains: config.additionalDomains || [],
+    injectS1: config.injectS1 || false,
   })};</script>`;
-  const rewriteRequestsTag = '<script src="/assets/rewrite-requests.js"></script>';
-  let s1Tag = '';
-  if (config.injectS1) {
-    s1Tag = '<script src="/assets/s1.js"></script>';
-  }
+  const rewritingTag = '<script src="/assets/rewriting/index.js"></script>';
   const $ = cheerio.load(html, { decodeEntities: false });
-  $('head').prepend(`\n${configScript}\n${rewriteRequestsTag}\n${s1Tag}\n`);
+  $('head').prepend(`\n${configScript}\n${rewritingTag}\n`);
   return $.html();
 }
 
@@ -262,12 +254,7 @@ async function proxyResource(targetUrl, req, res, accountContext = {}) {
         try {
           const redirectUrl = new URL(headers.location, targetUrl);
           if (redirectUrl.hostname === config.targetDomain || redirectUrl.hostname.endsWith('.' + config.targetDomain)) {
-            const sub = parseSubdomainFromHost(redirectUrl.hostname, config.targetDomain);
-            const protocol = (req.secure || req.headers['x-forwarded-proto'] === 'https' || req.headers['x-forwarded-ssl'] === 'on') ? 'https' : 'http';
-            const baseProxyDomain = config.proxyDomain.split(':')[0];
-            const newHost = sub ? `${sub}.${baseProxyDomain}` : baseProxyDomain;
-            const pathWithAccount = accountSlug ? '/a/' + accountSlug + (redirectUrl.pathname === '/' ? '' : redirectUrl.pathname) : redirectUrl.pathname;
-            headers.location = `${protocol}://${newHost}${pathWithAccount}${redirectUrl.search}${redirectUrl.hash}`;
+            headers.location = rewriting.rewriteLocationToProxy(redirectUrl, config.proxyDomain, config.targetDomain, accountSlug, req);
             console.log(`${COLORS.proxy}[PROXY] Rewrote API redirect: ${redirectUrl.toString()} -> ${headers.location}${COLORS.reset}`);
           }
         } catch (err) {
@@ -378,25 +365,7 @@ async function proxyResource(targetUrl, req, res, accountContext = {}) {
   }
 
   const refererValue = req.headers.referer
-    ? (() => {
-        try {
-          const refUrl = new URL(req.headers.referer);
-          const proxyRoot = config.proxyDomain;
-          const targetRoot = config.targetDomain;
-          const refHost = refUrl.hostname;
-          const sub = parseSubdomainFromHost(refHost, proxyRoot);
-          const newHost = sub ? `${sub}.${targetRoot}` : targetRoot;
-          refUrl.hostname = newHost;
-          if (accountSlug && refUrl.pathname.startsWith('/a/' + accountSlug + '/')) {
-            refUrl.pathname = refUrl.pathname.slice(('/a/' + accountSlug).length) || '/';
-          } else if (accountSlug && refUrl.pathname === '/a/' + accountSlug) {
-            refUrl.pathname = '/';
-          }
-          return refUrl.toString();
-        } catch {
-          return `https://${config.targetDomain}/`;
-        }
-      })()
+    ? rewriting.rewriteRefererToTarget(req.headers.referer, config.proxyDomain, config.targetDomain, accountSlug)
     : `https://${config.targetDomain}/`;
 
   const outgoingHeaders = {
@@ -423,12 +392,7 @@ async function proxyResource(targetUrl, req, res, accountContext = {}) {
       try {
         const redirectUrl = new URL(headers.location, targetUrl);
         if (redirectUrl.hostname === config.targetDomain || redirectUrl.hostname.endsWith('.' + config.targetDomain)) {
-          const sub = parseSubdomainFromHost(redirectUrl.hostname, config.targetDomain);
-          const protocol = (req.secure || req.headers['x-forwarded-proto'] === 'https' || req.headers['x-forwarded-ssl'] === 'on') ? 'https' : 'http';
-          const baseProxyDomain = config.proxyDomain.split(':')[0];
-          const newHost = sub ? `${sub}.${baseProxyDomain}` : baseProxyDomain;
-          const pathWithAccount = accountSlug ? '/a/' + accountSlug + (redirectUrl.pathname === '/' ? '' : redirectUrl.pathname) : redirectUrl.pathname;
-          headers.location = `${protocol}://${newHost}${pathWithAccount}${redirectUrl.search}${redirectUrl.hash}`;
+          headers.location = rewriting.rewriteLocationToProxy(redirectUrl, config.proxyDomain, config.targetDomain, accountSlug, req);
           console.log(`${COLORS.proxy}[PROXY] Rewrote redirect: ${redirectUrl.toString()} -> ${headers.location}${COLORS.reset}`);
         }
       } catch (err) {
@@ -453,12 +417,7 @@ async function proxyResource(targetUrl, req, res, accountContext = {}) {
     } else {
       headers['access-control-allow-headers'] = 'Content-Type,Authorization,baggage,sentry-trace';
     }
-
-    // Strip headers that cause ERR_BLOCKED_BY_RESPONSE.NotSameOrigin when proxied (browser sees same-origin)
-    delete headers['cross-origin-resource-policy'];
-    delete headers['cross-origin-embedder-policy'];
-    delete headers['cross-origin-opener-policy'];
-
+    
     res.writeHead(proxyRes.statusCode, headers);
     
     if (proxyRes.statusCode >= 200 && proxyRes.statusCode < 300) {
@@ -504,7 +463,7 @@ app.use(async (req, res) => {
 
   const rootDomain = config.proxyDomain;
   const host = (req.hostname || req.headers.host || '').split(':')[0];
-  const subdomain = parseSubdomainFromHost(host, rootDomain);
+  const subdomain = rewriting.parseSubdomainFromHost(host, rootDomain);
   const queryPart = req.url.includes('?') ? '?' + req.url.split('?')[1] : '';
   let targetUrl;
   if (subdomain) {
@@ -517,6 +476,12 @@ app.use(async (req, res) => {
 
   const staticResource = isStaticResource(cleanPath);
   const accept = req.headers.accept || '';
+
+  // Skip proxying: redirect browser to target for static chunks (faster, less server load)
+  if (req.method === 'GET' && cleanPath.startsWith('/_next/static/')) {
+    res.redirect(302, targetUrl);
+    return;
+  }
 
   if (isApiRequest(targetUrl)) {
     await proxyResource(targetUrl, req, res, accountContext);

@@ -147,25 +147,19 @@ function parseSubdomainFromHost(host, rootDomain) {
 ### injectScripts
 ```js
 function injectScripts(html) {
-  const configScript = `<script>window.proxyConfig = ${JSON.stringify({
-    proxyDomain: config.proxyDomain,
-    targetDomain: config.targetDomain,
-    tags: config.tagsToOverride,
-    attributes: config.attributesToOverride,
-    skipRewriteDomains: config.skipRewriteDomains,
-    noCredentialsDomains: config.noCredentialsDomains
-  })};</script>`;
-  const rewriteRequestsTag = '<script src="/assets/rewrite-requests.js"></script>';
+  const configScript = `<script>window.proxyConfig = ${JSON.stringify({ ... })};</script>`;
+  const sharedTag = '<script src="/assets/rewriting/shared.js"></script>';
+  const rewriteRequestsTag = '<script src="/assets/rewriting/rewrite-requests.js"></script>';
   let s1Tag = '';
   if (config.injectS1) {
-    s1Tag = '<script src="/assets/s1.js"></script>';
+    s1Tag = '<script src="/assets/rewriting/s1.js"></script>';
   }
   const $ = cheerio.load(html, { decodeEntities: false });
-  $('head').prepend(`\n${configScript}\n${rewriteRequestsTag}\n${s1Tag}\n`);
+  $('head').prepend(`\n${configScript}\n${sharedTag}\n${rewriteRequestsTag}\n${s1Tag}\n`);
   return $.html();
 }
 ```
-*Injects configuration and client-side scripts into the HTML head. Optionally injects s1.js if enabled in config.*
+*Injects configuration and rewriting client scripts (from src/rewriting/client/) into the HTML head. Optionally injects s1.js if enabled in config.*
 
 ---
 

@@ -1,10 +1,11 @@
 // Configuration for Puppeteer Reverse Proxy
+const rewritingConstants = require('./rewriting/constants');
 
 module.exports = {
   proxyDomain: process.env.PROXY_DOMAIN || 'localhost:3000', // Your proxy domain
   targetDomain: process.env.TARGET_DOMAIN || 'leonardo.ai',   // The real target domain
-  tagsToOverride: ['img', 'link', 'script', 'iframe'],
-  attributesToOverride: ['href', 'src', 'content'],
+  tagsToOverride: rewritingConstants.tagsToOverride,
+  attributesToOverride: rewritingConstants.attributesToOverride,
   proxyEnabled: process.env.PROXY_ENABLED === 'true' || process.env.PROXY_ENABLED === undefined ? true : false, // Set to true to use an HTTP proxy
   userAgent: process.env.USER_AGENT || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
   httpProxy: {
@@ -13,29 +14,12 @@ module.exports = {
     username: process.env.HTTP_PROXY_USERNAME || '7uFsqCYc65O2fmn',
     password: process.env.HTTP_PROXY_PASSWORD || '3GHBXbTQT7S67Ll'
   },
-  // New option to enable/disable rewriting of static elements
   rewriteStatic: false,
-  // New option to enable/disable injection of s1.js
   injectS1: false,
-
-  skipRewriteDomains: [
-    'consent.cookiefirst.com'
-    
-  ],
-  // Domains for which credentials (cookies, etc) should NOT be sent
-  noCredentialsDomains: [
-    'app.launchdarkly.com',
-    'events.launchdarkly.com',
-    'c.adora-cdn.com',
-    'consent.cookiefirst.com',
-    'linkedin.com',
-    'consent-eu.cookiefirst.com',
-    'cookiefirst.com', // Match all cookiefirst.com subdomains
-    'braze.com', // Match all braze.com subdomains (e.g., sdk.iad-07.braze.com)
-    'api.leonardo.ai',
-    'braintreegateway.com', // Match all braintreegateway.com subdomains
-    'braintree-api.com', // Match all braintree-api.com subdomains
-    'payments.braintree-api.com',
-    'api.braintreegateway.com'
-  ]
+  skipRewriteDomains: rewritingConstants.skipRewriteDomains,
+  noCredentialsDomains: rewritingConstants.noCredentialsDomains,
+  noRewriteDomains: rewritingConstants.noRewriteDomains,
+  cookiefirstDomains: rewritingConstants.cookiefirstDomains,
+  linkedinDomain: rewritingConstants.linkedinDomain,
+  additionalDomains: rewritingConstants.additionalDomains,
 }; 

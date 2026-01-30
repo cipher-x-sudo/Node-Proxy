@@ -1,6 +1,7 @@
 const { pool } = require('../db/connection');
 const fs = require('fs');
 const path = require('path');
+const rewritingConstants = require('../rewriting/constants');
 
 let configCache = null;
 let cacheTimestamp = null;
@@ -85,8 +86,8 @@ async function getConfig() {
   const mergedConfig = {
     proxyDomain: process.env.PROXY_DOMAIN || config?.proxyDomain || 'localhost:3000',
     targetDomain: process.env.TARGET_DOMAIN || config?.targetDomain || 'leonardo.ai',
-    tagsToOverride: config?.tagsToOverride || ['img', 'link', 'script', 'iframe'],
-    attributesToOverride: config?.attributesToOverride || ['href', 'src', 'content'],
+    tagsToOverride: config?.tagsToOverride || rewritingConstants.tagsToOverride,
+    attributesToOverride: config?.attributesToOverride || rewritingConstants.attributesToOverride,
     proxyEnabled: process.env.PROXY_ENABLED === 'true' || 
                   (process.env.PROXY_ENABLED === undefined ? (config?.proxyEnabled ?? true) : false),
     userAgent: process.env.USER_AGENT || config?.userAgent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
@@ -98,18 +99,12 @@ async function getConfig() {
     },
     rewriteStatic: config?.rewriteStatic || false,
     injectS1: config?.injectS1 || false,
-    skipRewriteDomains: config?.skipRewriteDomains || ['consent.cookiefirst.com'],
-    noCredentialsDomains: config?.noCredentialsDomains || [
-      'app.launchdarkly.com',
-      'events.launchdarkly.com',
-      'c.adora-cdn.com',
-      'consent.cookiefirst.com',
-      'linkedin.com',
-      'consent-eu.cookiefirst.com',
-      'cookiefirst.com',
-      'braze.com',
-      'api.leonardo.ai',
-    ],
+    skipRewriteDomains: config?.skipRewriteDomains || rewritingConstants.skipRewriteDomains,
+    noCredentialsDomains: config?.noCredentialsDomains || rewritingConstants.noCredentialsDomains,
+    noRewriteDomains: config?.noRewriteDomains || rewritingConstants.noRewriteDomains,
+    cookiefirstDomains: config?.cookiefirstDomains || rewritingConstants.cookiefirstDomains,
+    linkedinDomain: config?.linkedinDomain || rewritingConstants.linkedinDomain,
+    additionalDomains: config?.additionalDomains || rewritingConstants.additionalDomains,
   };
 
   // Update cache
