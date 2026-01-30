@@ -453,7 +453,12 @@ async function proxyResource(targetUrl, req, res, accountContext = {}) {
     } else {
       headers['access-control-allow-headers'] = 'Content-Type,Authorization,baggage,sentry-trace';
     }
-    
+
+    // Strip headers that cause ERR_BLOCKED_BY_RESPONSE.NotSameOrigin when proxied (browser sees same-origin)
+    delete headers['cross-origin-resource-policy'];
+    delete headers['cross-origin-embedder-policy'];
+    delete headers['cross-origin-opener-policy'];
+
     res.writeHead(proxyRes.statusCode, headers);
     
     if (proxyRes.statusCode >= 200 && proxyRes.statusCode < 300) {
@@ -512,12 +517,6 @@ app.use(async (req, res) => {
 
   const staticResource = isStaticResource(cleanPath);
   const accept = req.headers.accept || '';
-
-  // Skip proxying: redirect browser to target for static chunks (faster, less server load)
-  if (req.method === 'GET' && cleanPath.startsWith('/_next/static/')) {
-    res.redirect(302, targetUrl);
-    return;
-  }
 
   if (isApiRequest(targetUrl)) {
     await proxyResource(targetUrl, req, res, accountContext);
