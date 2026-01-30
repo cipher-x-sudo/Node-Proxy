@@ -33,17 +33,21 @@ const COLORS = {
   reset: '\x1b[0m',
 };
 
-let browserPromise = puppeteer.launch({
-  args: [
-    '--no-sandbox',
-    '--disable-setuid-sandbox',
-    '--disable-dev-shm-usage',
-    ...(config.proxyEnabled ? [
-      `--proxy-server=${config.httpProxy.host}:${config.httpProxy.port}`
-    ] : [])
-  ],
-  headless: 'new',
-});
+function launchBrowser() {
+  return puppeteer.launch({
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      ...(config.proxyEnabled ? [
+        `--proxy-server=${config.httpProxy.host}:${config.httpProxy.port}`
+      ] : [])
+    ],
+    headless: 'new',
+  });
+}
+
+let browserPromise = launchBrowser();
 
 // Cookies will be loaded from database with file fallback
 // Use getCookies() function to get fresh cookies (with caching)
@@ -515,7 +519,19 @@ app.use(async (req, res) => {
   }
 
   if (!staticResource && accept.includes('text/html')) {
-    const browser = await browserPromise;
+    let browser;
+    try {
+      browser = await browserPromise;
+    } catch (err) {
+      console.log(`${COLORS.puppeteer}[PUPPETEER] Browser not ready, launching...${COLORS.reset}`);
+      browserPromise = launchBrowser();
+      browser = await browserPromise;
+    }
+    if (!browser.isConnected()) {
+      console.log(`${COLORS.puppeteer}[PUPPETEER] Browser disconnected, relaunching...${COLORS.reset}`);
+      browserPromise = launchBrowser();
+      browser = await browserPromise;
+    }
     const page = await browser.newPage();
     await page.setUserAgent(config.userAgent);
 
@@ -553,6 +569,15 @@ app.use(async (req, res) => {
     } catch (err) {
       navigationError = err;
       console.log(`${COLORS.error}[ERROR] Puppeteer navigation error for ${targetUrl}: ${err.message}${COLORS.reset}`);
+      // Fallback: try domcontentloaded (faster, often enough for proxy rewrite)
+      if (err.message && err.message.includes('timeout')) {
+        try {
+          await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+          navigationError = null;
+        } catch (fallbackErr) {
+          console.log(`${COLORS.error}[ERROR] Puppeteer fallback navigation failed: ${fallbackErr.message}${COLORS.reset}`);
+        }
+      }
     }
 
     if (navigationError) {
@@ -632,6 +657,21 @@ if (require.main === module) {
 
       process.on('SIGINT', shutdown);
       process.on('SIGTERM', shutdown);
+
+      // Ensure browser is ready and log; relaunch on disconnect
+      try {
+        const browser = await browserPromise;
+        const version = await browser.version().catch(() => 'unknown');
+        console.log(`${COLORS.puppeteer}[PUPPETEER] Browser ready (${version})${COLORS.reset}`);
+        browser.on('disconnected', () => {
+          console.log(`${COLORS.puppeteer}[PUPPETEER] Browser disconnected, will relaunch on next request${COLORS.reset}`);
+          browserPromise = launchBrowser();
+        });
+      } catch (err) {
+        console.error(`${COLORS.error}[PUPPETEER] Browser launch failed: ${err.message}${COLORS.reset}`);
+        console.log(`${COLORS.puppeteer}[PUPPETEER] Will retry on first HTML request${COLORS.reset}`);
+        browserPromise = launchBrowser();
+      }
 
       // Use HTTP only - Railway handles HTTPS termination at the edge
       app.listen(PORT, '0.0.0.0', () => {
